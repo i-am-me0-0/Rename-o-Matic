@@ -8,8 +8,8 @@ import os
 import sys
 
 
-
-CONFIG_FILE = Path("config.ini")
+#CONFIG_FILE = Path("config.ini")
+CONFIG_FILE = Path(os.environ.get("RENAMER_CONFIG_FILE", "config.ini"))
 
 DEFAULTS = {
     "Paths": {

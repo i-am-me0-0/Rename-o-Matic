@@ -1,4 +1,9 @@
 # main.py (entry point only)
+
+import sys
+import os
+if len(sys.argv) > 1 and sys.argv[1].lower() == "test":
+    os.environ["RENAMER_CONFIG_FILE"] = "testconfig.ini"
 from config import OMDB_API_KEY
 from gui.app import launch_app
 
