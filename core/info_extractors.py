@@ -27,12 +27,27 @@ def apply_series_alias(name: str) -> str:
 
 
 def extract_movie_info(filename):
-    # match = re.match(r"^(.*?)(?:[ ._-]*)\(?((?:19|20)\d{2})\)?[ ._-]*(.*)$", filename)
-    match = re.match(r"^(.*?)[\s._\[(\-]*((?:19|20)\d{2})[\s._\])\-]*(.*)$", filename)
+    resolution_terms = ["720p", "1080p", "2160p", "480p"]
+    # 1. If filename starts with year, always extract it
+    match_start_year = re.match(r"^((?:19|20)\d{2})[\s._-]+(.*)$", filename)
+    if match_start_year:
+        year = match_start_year.group(1)
+        rest = match_start_year.group(2)
+        title = rest.strip().replace('.', ' ').replace('_', ' ')
+        return title, year, ""
+
+    # 2. Try to match year anywhere except if followed by 'p' (resolution)
+    match = re.match(r"^(.*?)[\s._\[(\-]*((?:19|20)\d{2})(?!p)[\s._\])\-]*(.*)$", filename)
     if match:
         title = match.group(1).strip().replace('.', ' ').replace('_', ' ')
         year = match.group(2)
         extras = clean_extras(match.group(3))
+        # If year is actually a resolution, move it to extras
+        for res in resolution_terms:
+            if str(year) + "p" in filename:
+                extras = (extras + " " + str(year) + "p").strip() if extras else str(year) + "p"
+                year = None
+                break
         return title, year, extras
     return None, None, None
 
