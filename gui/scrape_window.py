@@ -15,16 +15,34 @@ class ScrapeWindow(tk.Frame):
         label.pack(pady=10)
         # btn_scrape = tk.Button(self, text="Scrape All Images", command=self.do_scrape)
         # btn_scrape.pack(pady=5)
-        btn_update_main = tk.Button(self, text="Update Movie/Series Poster URLs", command=self.update_main_posters)
-        btn_update_main.pack(pady=5)
-        btn_update_episodes = tk.Button(self, text="Update Episode Thumbnails URLs", command=self.update_episode_thumbnails)
-        btn_update_episodes.pack(pady=5)
-        btn_download = tk.Button(self, text="Download Posters/Thumbnails", command=self.download_all_images)
-        btn_download.pack(pady=5)
+        # btn_update_main = tk.Button(self, text="Update Movie/Series Poster URLs", command=self.update_main_posters)
+        # btn_update_main.pack(pady=5)
+        # btn_update_episodes = tk.Button(self, text="Update Episode Thumbnails URLs", command=self.update_episode_thumbnails)
+        # btn_update_episodes.pack(pady=5)
+        btn_update_from_filenames = tk.Button(self, text="Update All Poster URLs from Filenames", command=self.update_posters_from_filenames)
+        btn_update_from_filenames.pack(pady=5)
+        # btn_download = tk.Button(self, text="Download Posters/Thumbnails", command=self.download_all_images)
+        # btn_download.pack(pady=5)
+        
+        btn_download_from_cache = tk.Button(self, text="Download Posters from Poster URL Cache", command=self.download_images_from_poster_cache)
+        btn_download_from_cache.pack(pady=5)
         btn_back = tk.Button(self, text="Back", command=on_back)
         btn_back.pack(pady=10)
         self.status = tk.Label(self, text="")
         self.status.pack(pady=5)
+
+    def download_images_from_poster_cache(self):
+        from core.poster_scraper import download_images_from_poster_cache
+        def status_callback(msg):
+            if hasattr(self, 'status'):
+                self.status.config(text=msg)
+        download_images_from_poster_cache(status_callback=status_callback)
+    def update_posters_from_filenames(self):
+        from core.poster_scraper import update_posters_from_filenames
+        def status_callback(msg):
+            if hasattr(self, 'status'):
+                self.status.config(text=msg)
+        update_posters_from_filenames(status_callback=status_callback)
 
     def do_scrape(self):
         try:
