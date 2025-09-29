@@ -8,7 +8,7 @@ import tkinter as tk
 from pathlib import Path
 from io import BytesIO
 from PIL import Image, ImageTk
-from config import OMDB_API_KEY, OMDB_REQUEST_DELAY, OMDB_SEARCH_LIMIT, USER_AGENTS, IMDB_CACHE_FILE
+from config import OMDB_API_KEY, OMDB_REQUEST_DELAY, OMDB_SEARCH_LIMIT, USER_AGENTS, IMDB_CACHE_FILE, debug_print
 from typing import Optional, Callable, Any, Union, cast, Dict, List, Tuple
 import threading
 from core.media_metadata_cache import set_entry, update_entry, add_episode_to_series, get_entry
@@ -18,7 +18,8 @@ _root: Optional[tk.Tk] = None
 
 def set_root(root_instance: tk.Tk) -> None:
     global _root
-    print(f"[DEBUG] set_root called with: {type(root_instance)}")
+    # print(f"[DEBUG] set_root called with: {type(root_instance)}")
+    debug_print(f"[DEBUG] set_root called with: {type(root_instance)}")
     _root = root_instance
 
 def get_root() -> Any:

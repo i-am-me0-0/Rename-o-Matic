@@ -14,6 +14,10 @@ def load_metadata() -> Dict[str, Any]:
         return {}
 
 def save_metadata(data: Dict[str, Any]):
+    if not MEDIA_METADATA_FILE.parent.exists():
+        MEDIA_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not MEDIA_METADATA_FILE.exists():
+        MEDIA_METADATA_FILE.write_text("{}", encoding="utf-8")
     with open(MEDIA_METADATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 

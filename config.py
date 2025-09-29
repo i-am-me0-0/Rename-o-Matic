@@ -37,7 +37,8 @@ DEFAULTS = {
         "default_include": "1",           # or "0"
         "omdb_api_key": "key",
         "create_movie_subfolders": "True",  # or False
-        "log_level": "info"  # or "debug", "warning", "error", "critical"
+        "log_level": "info",  # or "debug", "warning", "error", "critical"
+        "prepend_episode_title_to_extras": "True"  # or False
     },
     "OMDb": {
         "omdb_api_key": "key",
@@ -111,6 +112,8 @@ LANG_CODES = [lc.strip() for lc in cfg["General"]["lang_codes"].split(",")]
 #second arg is default, example movie_folder_location = default root
 MOVIE_FOLDER_LOCATION = cfg["General"].get("movie_folder_location", "root").strip().lower()
 DEFAULT_INCLUDE = cfg["General"].get("default_include", "1").strip()
+PREPEND_EPISODE_TITLE_TO_EXTRAS = cfg["General"].get("prepend_episode_title_to_extras", "True").strip().lower()
+
 OMDB_API_KEY = cfg["OMDb"].get("omdb_api_key", "key").strip()
 OMDB_REQUEST_DELAY = float(cfg["OMDb"].get("omdb_request_delay", "0.2"))
 OMDB_SEARCH_LIMIT = int(cfg["OMDb"].get("omdb_search_limit", "5"))

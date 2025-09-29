@@ -53,3 +53,56 @@ def is_imdb_id_skipped(imdb_id, name_or_skip_list):
             imdb_from_name = m.group(1)
     check_id = imdb_from_name or imdb_id
     return check_id in skip_list if check_id else False
+
+def get_episode_title_from_cache(ep_id: str) -> str:
+    """
+    Returns the episode title from media cache for the given episode IMDb ID, or empty string if not found.
+    """
+    if not ep_id:
+        debug_print(f"[get_episode_title_from_cache] No ep_id provided.")
+        return ""
+    from core.media_metadata_cache import get_entry, update_entry
+    entry = get_entry(ep_id)
+    # debug_print(f"[get_episode_title_from_cache] Checking media cache for ep_id: {ep_id}")
+    if entry and entry.get('title'):
+        # debug_print(f"[get_episode_title_from_cache] Found title in media cache: {entry['title']}")
+        return entry['title']
+    debug_print(f"[get_episode_title_from_cache] Title not found in media cache for ep_id: {ep_id}")
+    # Try manual episode cache (find the series/season/episode mapping for this ep_id)
+    from core.manual_episode_cache import load_manual_episode_cache
+    manual_cache = load_manual_episode_cache()
+    found = False
+    for series_id, seasons in manual_cache.items():
+        for season, episodes in seasons.items():
+            for episode, manual_ep_id in episodes.items():
+                if manual_ep_id == ep_id:
+                    # debug_print(f"[get_episode_title_from_cache] Found ep_id in manual cache: series={series_id}, season={season}, episode={episode}")
+                    found = True
+                    break
+            if found:
+                break
+        if found:
+            break
+    if found:
+        # If found, try to scrape OMDb info and add to media cache
+        from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id
+        # debug_print(f"[get_episode_title_from_cache] Scraping OMDb for ep_id: {ep_id}")
+        data = fetch_title_and_year_from_imdb_id(ep_id)
+        if data:
+            title, year = data
+            debug_print(f"[get_episode_title_from_cache] Scraped title: {title}, year: {year} for ep_id: {ep_id}")
+            update_entry(ep_id, {'title': title, 'year': year})
+            # Try media cache again
+            entry = get_entry(ep_id)
+            if entry and entry.get('title'):
+                debug_print(f"[get_episode_title_from_cache] Found title in media cache after scrape: {entry['title']}")
+                return entry['title']
+            else:
+                debug_print(f"[get_episode_title_from_cache] Title still not found in media cache after scrape for ep_id: {ep_id}")
+        else:
+            debug_print(f"[get_episode_title_from_cache] OMDb scrape failed for ep_id: {ep_id}")
+    else:
+        debug_print(f"[get_episode_title_from_cache] ep_id not found in manual cache: {ep_id}")
+    # If still not found, return None
+    debug_print(f"[get_episode_title_from_cache] Returning None for ep_id: {ep_id}")
+    return None

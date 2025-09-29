@@ -58,3 +58,25 @@ def get_title_diff(orig_title, meta_title):
         if tag == 'delete' or tag == 'replace':
             diff_words.extend(orig_words[i1:i2])
     return ' '.join(diff_words)
+
+
+#wanted to maybe check but havent had issues much and should be even less with year validation, maybe serie episodes manually entered but don't know how to check properly
+def movie_imdb_id_validation(title: str, imdb_id: str) -> bool:
+    """
+    Checks if the given title matches the title associated with the IMDb ID in metadata cache (or OMDb if not cached).
+    Returns True if they match, False otherwise.
+    """
+    if not title or not imdb_id:
+        return False
+    from core.media_metadata_cache import get_entry
+    from actions.custom_imdb_web_poster_scraper import scrape_full_movie_metadata
+    meta = get_entry(imdb_id)
+    if not meta:
+        # Try to fetch from OMDb if not in cache
+        scrape_full_movie_metadata(imdb_id)
+        meta = get_entry(imdb_id)
+        if not meta:
+            return False
+    meta_title = meta.get('title', '').strip().lower()
+    input_title = title.strip().lower()
+    return meta_title == input_title
