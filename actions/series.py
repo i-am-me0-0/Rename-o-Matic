@@ -603,23 +603,135 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
         else:
             extras_out.append(str(extras))
 
-    # Prepend canonical episode title to extras if configured and title exists, but avoid duplicates.
-    # Only add if not already present word-wise in extras.
+    # Prepend or replace episode title in extras robustly
     if PREPEND_EPISODE_TITLE_TO_EXTRAS and canonical_ep_title:
-        title_words = set(str(canonical_ep_title).lower().split())
-        # Find and remove extras that are word-wise duplicate of the title
+        # import re
+        # def normalize_title(title):
+        #     title = title.lower()
+        #     title = re.sub(r"[.,'’\"!?;:\-\(\)\[\]]", "", title)
+        #     title = title.replace("&", "and")
+        #     title = re.sub(r"\s+", " ", title)
+        #     return title.strip()
+        import re, unicodedata
+        def normalize_title(title):
+            if title is None:
+                return ""
+            title = unicodedata.normalize("NFKD", str(title))
+            # map dash variants to ASCII hyphen
+            title = re.sub(r"[‐-‒–—―]", "-", title)
+            title = title.replace("&", "and")
+            # remove punctuation but keep spaces and hyphens
+            title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE)
+            # replace hyphens with spaces so "Ice-Ca" and "Ice Ca" compare equal
+            title = title.replace("-", " ")
+            title = re.sub(r"\s+", " ", title).strip().lower()
+            return title
+        
+
+        def levenshtein(a, b):
+            if a == b:
+                return 0
+            if not a:
+                return len(b)
+            if not b:
+                return len(a)
+            prev_row = list(range(len(b) + 1))
+            for i, ca in enumerate(a, 1):
+                curr_row = [i]
+                for j, cb in enumerate(b, 1):
+                    insertions = prev_row[j] + 1
+                    deletions = curr_row[j - 1] + 1
+                    substitutions = prev_row[j - 1] + (ca != cb)
+                    curr_row.append(min(insertions, deletions, substitutions))
+                prev_row = curr_row
+            return prev_row[-1]
+
+        title_str = str(canonical_ep_title).strip()
+        norm_canonical = normalize_title(title_str)
+        # new_extras_out = []
+        # for e in extras_out:
+        #     e_clean = str(e).strip()
+        #     extras_words = e_clean.split()
+        #     match = None
+        #     # Try to find a substring in extras that matches the canonical title
+        #     for i in range(len(extras_words)):
+        #         for j in range(i+1, len(extras_words)+1):
+        #             candidate = " ".join(extras_words[i:j])
+        #             if normalize_title(candidate) == norm_canonical:
+        #                 match = candidate
+        #                 break
+        #         if match:
+        #             break
+        #     if match:
+        #         # Replace the matched substring with the canonical title
+        #         replaced = e_clean.replace(match, title_str, 1).strip()
+        #         # Remove duplicate canonical title if present
+        #         if replaced.startswith(title_str):
+        #             new_extras_out.append(replaced)
+        #         else:
+        #             new_extras_out.append(f"{title_str} - {replaced}")
+        #     else:
+        #         # # Prepend canonical title to extras
+        #         # if e_clean:
+        #         #     new_extras_out.append(f"{title_str} - {e_clean}")
+        #         # else:
+        #         #     new_extras_out.append(title_str)
+        #         # Prepend canonical title to extras, but check Levenshtein distance before adding both
+        #         norm_e = normalize_title(e_clean)
+        #         distance = levenshtein(norm_e, norm_canonical)
+        #         if distance <= 2:
+        #             new_extras_out.append(title_str)
+        #         else:
+        #             new_extras_out.append(f"{title_str} - {e_clean}")
+        # # Only keep one block if duplicate
+        # extras_out = []
+        # for block in new_extras_out:
+        #     if block not in extras_out:
+        #         extras_out.append(block)
         new_extras_out = []
         for e in extras_out:
-            e_words = set(str(e).lower().split())
-            # If all title words are in this extra, consider it a duplicate
-            if title_words and title_words.issubset(e_words):
+            e_clean = str(e).strip()
+            if not e_clean:
                 continue
-            new_extras_out.append(e)
-        extras_out = new_extras_out
-        # Only add the title if not already present in extras (word-wise)
-        already_present = any(title_words.issubset(set(str(e).lower().split())) for e in extras_out)
-        if not already_present:
-            extras_out.insert(0, str(canonical_ep_title))
+            # Try substring match with normalized comparison
+            extras_words = e_clean.split()
+            match = None
+            for i in range(len(extras_words)):
+                for j in range(i+1, len(extras_words)+1):
+                    candidate = " ".join(extras_words[i:j])
+                    if normalize_title(candidate) == norm_canonical:
+                        match = candidate
+                        break
+                if match:
+                    break
+            if match:
+                pattern = re.compile(re.escape(match), flags=re.IGNORECASE)
+                replaced = pattern.sub(title_str, e_clean, count=1).strip()
+                if normalize_title(replaced) == norm_canonical:
+                    new_extras_out.append(title_str)
+                else:
+                    new_extras_out.append(replaced)
+            else:
+                norm_e = normalize_title(e_clean)
+                distance = levenshtein(norm_e, norm_canonical)
+                if distance <= 2:
+                    new_extras_out.append(title_str)
+                else:
+                    new_extras_out.append(f"{title_str} - {e_clean}")
+
+        # Deduplicate based on normalized form
+        extras_out = []
+        seen_norms = set()
+        for block in new_extras_out:
+            if not block:
+                continue
+            token = str(block).strip()
+            if not token:
+                continue
+            norm = normalize_title(token)
+            if norm not in seen_norms:
+                extras_out.append(token)
+                seen_norms.add(norm)
 
     # For edge/specials or movie-cut specials, always include original file stem as extra
     if (season is None or episode is None or is_movie_cut_special) and original_file_stem:
