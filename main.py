@@ -10,7 +10,7 @@ from config import OMDB_API_KEY, PREPEND_EPISODE_TITLE_TO_EXTRAS, debug_print
 
 def main():
     if OMDB_API_KEY == "key" or not OMDB_API_KEY.strip():
-        print("❌ OMDB API key is missing. Please add it to the config.ini under [General].")
+        print("❌ OMDB API key is missing. Please add it to the config.ini under [OMDb].")
         return
     # debug_print(f"value of prepend_episode_title_to_extras = {PREPEND_EPISODE_TITLE_TO_EXTRAS} / config.ini under [General].")
     launch_app()

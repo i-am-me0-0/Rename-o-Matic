@@ -6,6 +6,8 @@ from config import EDGE_CASE_KEYWORDS, SERIES_ALIASES
 def clean_extras(extras: str) -> str:
     """Clean leading/trailing separators and strip wrapping parentheses."""
     cleaned = extras.strip().lstrip(" -_.").strip()
+    # Replace dots with spaces (only on first clean)
+    cleaned = cleaned.replace('.', ' ')
     # Remove surrounding parentheses if present
     if cleaned.startswith("(") and cleaned.endswith(")"):
         cleaned = cleaned[1:-1].strip()

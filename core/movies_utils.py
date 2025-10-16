@@ -49,7 +49,8 @@ def get_title_diff(orig_title, meta_title):
     if not orig_title or not meta_title:
         return orig_title or ''
     orig_words = orig_title.split()
-    meta_words = meta_title.split()
+    # Remove colons from meta_title words for matching
+    meta_words = [w.replace(':', '') for w in meta_title.split()]
     # Use SequenceMatcher to find matching blocks
     sm = difflib.SequenceMatcher(None, orig_words, meta_words)
     diff_words = []

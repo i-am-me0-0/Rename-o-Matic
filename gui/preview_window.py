@@ -1,6 +1,6 @@
 # gui/preview_window.py
 import tkinter as tk
-from gui.preview import generate_preview, execute_from_preview
+from actions.preview import generate_preview, execute_from_preview
 from gui.planned_renames_viewer import PlannedRenamesFrame
 
 class PreviewWindow(tk.Frame):

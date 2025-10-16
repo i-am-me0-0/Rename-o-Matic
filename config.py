@@ -13,8 +13,8 @@ CONFIG_FILE = Path(os.environ.get("RENAMER_CONFIG_FILE", "config.ini"))
 
 DEFAULTS = {
     "Paths": {
-        "movies_dir": "./movies",
-        "series_dir": "./series",
+        "movies_dir": "./testLibrary/movies",
+        "series_dir": "./testLibrary/series",
         "log_file": "rename_log.txt",
         "dry_run_log": "dry_run_log.txt",
         "planned_renames_file": "planned_renames.json"
@@ -35,8 +35,7 @@ DEFAULTS = {
         "lang_codes": ", ".join(["", "en", "de", "fr", "es", "nl"]),
         "movie_folder_location": "root",  # or "source"
         "default_include": "1",           # or "0"
-        "omdb_api_key": "key",
-        "create_movie_subfolders": "True",  # or False
+        "create_movie_subfolders": "False",  # or False
         "log_level": "info",  # or "debug", "warning", "error", "critical"
         "prepend_episode_title_to_extras": "True"  # or False
     },
@@ -177,7 +176,7 @@ def reload_globals():
     LANG_CODES = [lc.strip() for lc in cfg["General"]["lang_codes"].split(",")]
     MOVIE_FOLDER_LOCATION = cfg["General"].get("movie_folder_location", "root").strip().lower()
     DEFAULT_INCLUDE = cfg["General"].get("default_include", "1").strip()
-    OMDB_API_KEY = cfg["General"].get("omdb_api_key", "key").strip()
+
     CREATE_MOVIE_SUBFOLDERS = cfg["General"].get("create_movie_subfolders", "True").strip().lower() == "true"
     LOG_LEVEL = cfg["General"].get("log_level", "info").strip().lower()
 

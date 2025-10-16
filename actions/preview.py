@@ -47,8 +47,12 @@ def generate_preview():
 
     # Write as JSON array of objects
     json_entries = []
+    MAX_PATH = 260  # Windows max path length
     for item in planned:
         sanitized_to = validate_and_sanitize_path(item["dest"])
+        if len(sanitized_to) > MAX_PATH:
+            print(f"❌ Skipping: Destination path too long ({len(sanitized_to)} chars): {sanitized_to}")
+            continue
         json_entries.append({
             "include": int(DEFAULT_INCLUDE),
             "type": item["type"],
