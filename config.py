@@ -43,7 +43,7 @@ DEFAULTS = {
         "omdb_api_key": "key",
         "omdb_request_delay": "0.2",
         "omdb_search_limit": "5",
-        "user_agents": ""
+        "user_agents": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     },
     "PosterScraper": {
         "scrape_movie_posters": "true",
