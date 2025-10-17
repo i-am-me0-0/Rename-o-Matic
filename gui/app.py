@@ -1,6 +1,6 @@
 # gui/app.py
 import tkinter as tk
-from config import cfg, reload_config#, PREVIEW_FILE
+from config import cfg#, reload_config#, PREVIEW_FILE
 from actions.omdb_gui_scraper import set_root
 from undo import undo_last_operations
 from pathlib import Path

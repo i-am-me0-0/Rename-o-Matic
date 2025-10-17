@@ -24,127 +24,25 @@ from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id, fetch_ep
 
 # --- Utility: Get all metadata entries (imdb_id, entry) ---
 def get_all_metadata_entries():
+    """Yield (imdb_id, metadata_entry) for every entry in the media metadata cache.
+
+    This tiny generator is used by other helpers that need to iterate the media cache.
+    """
     metadata = load_metadata()
     for mid, entry in metadata.items():
         yield mid, entry
 
 # --- Utility: Clean brackets from IDs ---
 def clean_brackets(text):
+    """Remove surrounding [] or () from a string and trim whitespace.
+
+    Used often for cleaning IMDb IDs stored in filenames like "[tt1234567]".
+    """
     cleaned = text.strip()
     if (cleaned.startswith("[") and cleaned.endswith("]")) or (cleaned.startswith("(") and cleaned.endswith(")")):
         cleaned = cleaned[1:-1].strip()
     return cleaned
 
-# # --- Step 1: Get or prompt for show IMDb ID (never for episode filenames) ---
-# def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
-#     # Always use the main series folder name as the cache key
-#     cache_key = folder_name
-#     if (show, cache_key) in show_id_map:
-#         return show_id_map[(show, cache_key)]
-
-#     # Load imdb_cache
-#     import json
-#     imdb_cache_path = Path(__file__).parent.parent / 'cache' / 'imdb_cache.json'
-#     try:
-#         with open(imdb_cache_path, 'r', encoding='utf-8') as f:
-#             imdb_cache = json.load(f)
-#     except Exception:
-#         imdb_cache = {}
-
-#     # # Try to get canonical title and years from metadata if available
-#     # imdb_id = imdb_cache.get(cache_key)
-#     # if imdb_id:
-#     #     meta = get_entry(imdb_id)
-#     #     if meta and meta.get('title'):
-#     #         series_title = meta['title']
-#     #         start_year = meta.get('year')
-#     #         end_year = meta.get('end_year')
-#     #         years_str = ""
-#     #         if start_year:
-#     #             try:
-#     #                 start_year = str(start_year)
-#     #             except Exception:
-#     #                 pass
-#     #         if end_year:
-#     #             try:
-#     #                 end_year = str(end_year)
-#     #             except Exception:
-#     #                 pass
-#     #         if start_year and end_year and start_year != end_year:
-#     #             years_str = f" ({start_year}-{end_year})"
-#     #         elif start_year:
-#     #             years_str = f" ({start_year})"
-#     #         cache_key = f"{series_title}{years_str}"
-
-#     # # Use updated cache_key for imdb_cache lookup
-#     imdb_id = imdb_cache.get(cache_key)
-#     meta = get_entry(imdb_id) if imdb_id else None
-
-#     # If the id is for a movie, but we're processing a series, always prompt user to confirm or override
-#     if meta and meta.get('type') == 'movie':
-#         # Find all cache entries with the same folder/show name (case-insensitive)
-#         matches = []
-#         for k, v in imdb_cache.items():
-#             if k.lower().strip() == cache_key.lower().strip():
-#                 alt_meta = get_entry(v)
-#                 if alt_meta:
-#                     matches.append((v, alt_meta))
-#         from tkinter import Tk, simpledialog
-#         root = Tk()
-#         root.withdraw()
-#         options = []
-#         for v, m in matches:
-#             t = m.get('title', v)
-#             y = m.get('year', '')
-#             typ = m.get('type', '')
-#             options.append(f"{t} ({y}) [{typ}] - {v}")
-#         prompt_text = (f"The current IMDb ID for '{cache_key}' is a movie.\n\n" +
-#                        (('Multiple IMDb entries found:\n' + '\n'.join(f"{i+1}. {opt}" for i, opt in enumerate(options)) +
-#                         "\n\nEnter the number of the correct entry, or leave blank to search for a series:") if len(matches) > 1 else
-#                         f"Movie: {options[0]}\n\nType '1' to accept, or leave blank to search for a series:"))
-#         choice = simpledialog.askstring("Ambiguous Title", prompt_text)
-#         root.destroy()
-#         try:
-#             if choice is not None and choice.strip() != '':
-#                 idx = int(choice) - 1
-#                 if 0 <= idx < len(matches):
-#                     imdb_id = matches[idx][0]
-#                     meta = matches[idx][1]
-#             else:
-#                 # User wants to search for a series instead
-#                 imdb_id = get_series_imdb_id_gui(cache_key, search_title=show)
-#                 meta = get_entry(imdb_id) if imdb_id else None
-#         except Exception:
-#             pass
-
-#     # If still not found or user wants to override, prompt as usual
-#     if not imdb_id or not meta or meta.get('type') != 'series':
-#         imdb_id = get_series_imdb_id_gui(cache_key, search_title=show)
-#         if imdb_id is None:
-#             debug_print(f"⏭️ Skipped by user: {cache_key}")
-#             return None
-#         meta = get_entry(imdb_id)
-#         if meta and meta.get('type') == 'series':
-#             # Only update cache if folder_name is not an ambiguous season folder (like 'S01', 's1', etc.)
-#             def is_ambiguous_season_folder(key):
-#                 import re
-#                 # Acceptable: 'Series Title S01', 'Series Title Season 1', etc.
-#                 # Ambiguous: 'S01', 's1', 'Season 1', etc. (no prefix)
-#                 season_patterns = [r'^(s\d+)$', r'^(S\d+)$', r'^(season \d+)$', r'^(Season \d+)$']
-#                 for pat in season_patterns:
-#                     if re.match(pat, key.strip()):
-#                         return True
-#                 return False
-#             if not is_ambiguous_season_folder(cache_key):
-#                 imdb_cache[cache_key] = imdb_id
-#                 try:
-#                     with open(imdb_cache_path, 'w', encoding='utf-8') as f:
-#                         json.dump(imdb_cache, f, indent=2, ensure_ascii=False)
-#                 except Exception:
-#                     pass
-
-#     show_id_map[(show, cache_key)] = imdb_id
-#     return imdb_id
 # --- Step 1: Get or prompt for show IMDb ID (never for episode filenames) ---
 def extract_years_from_folder(folder_name: str):
     """
@@ -215,8 +113,11 @@ def get_series_folder_name(path_or_name):
 def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
     # --- Tkinter dialog for IMDb ID conflict resolution ---
     def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason):
+        """Show a small dialog asking the user to resolve an IMDb ID conflict.
+
+        Returns a manually entered IMDb ID string or None to indicate skip.
+        """
         import tkinter as tk
-        from tkinter import simpledialog
         result = {'imdb_id': None, 'skip': False}
         def on_use():
             val = entry.get().strip()
@@ -357,7 +258,6 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
                         return True
             return False
 
-        # ⭐⭐⭐⭐⭐⭐⭐
         # If the picked ID is already used for a different folder with different years, show dialog
         if meta and meta.get('type') == 'series' and imdb_id_used_for_other_series(imdb_id, cache_key, folder_start, folder_end):
             reason = f"The IMDb ID you selected is already used for another folder with different years. Please enter a valid IMDb ID for this folder or skip."
@@ -370,7 +270,6 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             # Re-check for conflict
             if imdb_id_used_for_other_series(imdb_id, cache_key, folder_start, folder_end):
                 continue
-        # ⭐⭐⭐⭐⭐⭐⭐
         
         def is_ambiguous_season_folder(key):
             import re
@@ -441,99 +340,7 @@ def get_episode_imdb_id(show, imdb_id, season, episode, file_stem=None):
         return ep_id
     return None
 
-# # --- Step 4: Build output path for episode (robust, extras, specials, always append ep_id) ---
-# def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, original_file_stem=None):
-#     # Canonical series title and years from metadata
-#     series_title = show
-#     years_str = ""
-#     if imdb_id:
-#         meta = get_entry(imdb_id)
-#         if meta:
-#             if meta.get('title'):
-#                 series_title = meta['title']
-#             # Try to get years info
-#             start_year = meta.get('year')
-#             end_year = meta.get('end_year')
-#             # Accept 'year' as int or str
-#             if start_year:
-#                 try:
-#                     start_year = str(start_year)
-#                 except Exception:
-#                     pass
-#             if end_year:
-#                 try:
-#                     end_year = str(end_year)
-#                 except Exception:
-#                     pass
-#             if start_year and end_year and start_year != end_year:
-#                 years_str = f" ({start_year}-{end_year})"
-#             elif start_year:
-#                 years_str = f" ({start_year})"
-#             # If no year info, leave blank
-    # # Canonical episode info from metadata
-    # override_season, override_episode = season, episode
-    # ep_info = get_episode_info_by_id(ep_id) if ep_id else None
-    # from core.series_utils import get_episode_title_from_cache
-    # canonical_ep_title = get_episode_title_from_cache(ep_id) if ep_id else None
-    # is_movie_cut_special = False
-    # if ep_info:
-    #     # If OMDb type is 'movie' but we're in a series context, treat as special
-    #     if ep_info.get('type') == 'movie' and imdb_id:
-    #         override_season = 0
-    #         override_episode = 0
-    #         is_movie_cut_special = True
-    #     if ep_info.get('season') is not None:
-    #         override_season = int(ep_info['season'])
-    #     if ep_info.get('episode') is not None:
-    #         override_episode = int(ep_info['episode'])
-    #     if ep_info.get('series_title'):
-    #         series_title = ep_info['series_title']
-#     # Build extras (deduplicate, always include non-canonical info)
-#     from config import PREPEND_EPISODE_TITLE_TO_EXTRAS
-#     extras_out = []
-#     # For regular episodes, optionally prepend canonical episode title
-#     if override_season is not None and override_episode is not None and not is_movie_cut_special:
-#         if PREPEND_EPISODE_TITLE_TO_EXTRAS and canonical_ep_title:
-#             extras_out.append(str(canonical_ep_title))
-#         if extras:
-#             extras_out.append(str(extras))
-#     # For edge/specials or movie-cut specials, always include original file stem as extra
-#     if (season is None or episode is None or is_movie_cut_special) and original_file_stem:
-#         extras_out.append(original_file_stem)
-#         if is_movie_cut_special:
-#             extras_out.append("Movie Cut")
-#     # Remove duplicates and empty extras
-#     seen = set()
-#     deduped_extras = []
-#     for e in extras_out:
-#         if e and e not in seen:
-#             deduped_extras.append(e)
-#             seen.add(e)
-#     # Compose filename
-#     if override_season is not None and override_episode is not None:
-#         if override_season == 0:
-#             season_folder = "Season 00 - Specials"
-#         else:
-#             season_folder = f"Season {override_season:02}"
-#         episode_name = f"{series_title} - S{override_season:02}E{override_episode:02}"
-#     else:
-#         season_folder = "Season 00 - Specials"
-#         episode_name = f"{series_title} - S00E00"
-#     # Add extras if any
-#     if deduped_extras:
-#         extras_str = " - ".join([e for e in deduped_extras if e])
-#         if extras_str and extras_str not in episode_name:
-#             episode_name += f" [{extras_str}]"
-#     # Always append episode IMDb ID
-#     if ep_id:
-#         cleaned_ep_id = clean_brackets(ep_id)
-#         if cleaned_ep_id not in episode_name:
-#             episode_name += f" [{cleaned_ep_id}]"
-#     # Compose show folder name with years and IMDb ID
-#     show_folder = f"{series_title}{years_str} [{imdb_id}]" if imdb_id else series_title
-#     dest_folder = SERIES_DIR / show_folder / season_folder
-#     dest_path = dest_folder / (episode_name + file.suffix)
-#     return dest_folder, dest_path
+
 # --- Step 4: Build output path for episode (robust, extras, specials, always append ep_id) ---
 def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, original_file_stem=None):
     # Canonical series title and years from metadata
@@ -648,46 +455,7 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
 
         title_str = str(canonical_ep_title).strip()
         norm_canonical = normalize_title(title_str)
-        # new_extras_out = []
-        # for e in extras_out:
-        #     e_clean = str(e).strip()
-        #     extras_words = e_clean.split()
-        #     match = None
-        #     # Try to find a substring in extras that matches the canonical title
-        #     for i in range(len(extras_words)):
-        #         for j in range(i+1, len(extras_words)+1):
-        #             candidate = " ".join(extras_words[i:j])
-        #             if normalize_title(candidate) == norm_canonical:
-        #                 match = candidate
-        #                 break
-        #         if match:
-        #             break
-        #     if match:
-        #         # Replace the matched substring with the canonical title
-        #         replaced = e_clean.replace(match, title_str, 1).strip()
-        #         # Remove duplicate canonical title if present
-        #         if replaced.startswith(title_str):
-        #             new_extras_out.append(replaced)
-        #         else:
-        #             new_extras_out.append(f"{title_str} - {replaced}")
-        #     else:
-        #         # # Prepend canonical title to extras
-        #         # if e_clean:
-        #         #     new_extras_out.append(f"{title_str} - {e_clean}")
-        #         # else:
-        #         #     new_extras_out.append(title_str)
-        #         # Prepend canonical title to extras, but check Levenshtein distance before adding both
-        #         norm_e = normalize_title(e_clean)
-        #         distance = levenshtein(norm_e, norm_canonical)
-        #         if distance <= 2:
-        #             new_extras_out.append(title_str)
-        #         else:
-        #             new_extras_out.append(f"{title_str} - {e_clean}")
-        # # Only keep one block if duplicate
-        # extras_out = []
-        # for block in new_extras_out:
-        #     if block not in extras_out:
-        #         extras_out.append(block)
+        
         new_extras_out = []
         for e in extras_out:
             e_clean = str(e).strip()
@@ -817,25 +585,39 @@ def plan_series_renames():
     debug_print(f"[DEBUG] SKIP_IMDB_IDS: {SKIP_IMDB_IDS}")
     planned = []
     show_id_map = {}
-    
 
-    # --- Group files by canonical series title + years (from metadata) ---
+    # --- Load imdb_cache helper ---
     import json
     imdb_cache_path = Path(__file__).parent.parent / 'cache' / 'imdb_cache.json'
-    try:
-        with open(imdb_cache_path, 'r', encoding='utf-8') as f:
-            imdb_cache = json.load(f)
-    except Exception:
-        imdb_cache = {}
+    def load_imdb_cache():
+        try:
+            with open(imdb_cache_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    def save_imdb_cache(cache):
+        try:
+            with open(imdb_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
 
+    imdb_cache = load_imdb_cache()
+
+    # --- Helpers for grouping and normalization ---
     def normalize_folder_name(name: str) -> str:
         # Normalize unicode punctuation differences (e.g. en-dash vs hyphen)
         if not name:
             return name
         return name.replace('\u2013', '-').replace('\u2014', '-').strip()
 
-
     def get_canonical_group_key(show, folder_name):
+        """Return a grouping key for files that belong to the same logical show+years group.
+
+        The function prefers an IMDb id found in the folder name. If not found, it falls back
+        to using cached imdb_cache or prompting the user. If folder years and metadata years
+        disagree, it uses a folder-years-specific key to avoid mixing distinct runs.
+        """
         folder_name_norm = normalize_folder_name(folder_name)
         folder_start, folder_end = extract_years_from_folder(folder_name_norm)
 
@@ -914,7 +696,6 @@ def plan_series_renames():
 
         # If years mismatch, use folder's years in group key and force prompt for new ID
         if years_mismatch:
-            # Use folder's years in group key to keep them separate
             years_str = ""
             if folder_start and folder_end and folder_start != folder_end:
                 years_str = f" ({folder_start}-{folder_end})"
@@ -931,23 +712,20 @@ def plan_series_renames():
         if not (file.is_file() and is_video_file(file)):
             continue
         show, season, episode, extras = extract_episode_info(file.stem)
-        # folder_name = file.parent.name
         folder_name = get_series_folder_name(file)
         group_key = get_canonical_group_key(show, folder_name)
         series_files.setdefault(group_key, []).append(file)
 
-    for group_key, files in series_files.items():
+    # Helper to process each group of files (keeps original behaviour but split for clarity)
+    def process_group(group_key, files):
         debug_print(f"Processing group: {group_key}")
-        # Step 1: Get canonical IMDb ID for this group
-        # Use first file to get show/folder_name
         first_file = files[0]
         show, season, episode, extras = extract_episode_info(first_file.stem)
-        # folder_name = first_file.parent.name
         folder_name = get_series_folder_name(first_file)
         imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
         folder_imdb_id = get_folder_imdb_id(folder_name)
 
-        # Step 2: If folder IMDb ID is in skip list, only add missing episode IDs, skip further renaming
+        # If folder IMDb ID is in skip list, add missing episode IDs but skip renaming
         debug_print(f"Folder IMDb ID: {folder_imdb_id}")
         if is_imdb_id_skipped(folder_imdb_id, folder_name):
             debug_print(f"📁 Skipping entire series (folder IMDb ID in skip list): {folder_name}")
@@ -993,9 +771,9 @@ def plan_series_renames():
                         debug_print(f"Planned ADD ONLY IMDb ID for skipped folder: {file.name} -> {new_path}")
                 else:
                     debug_print(f"No season/episode info for: {file.name}")
-            continue
+            return
 
-        # Step 3: Regular processing for files not in skip list
+        # Regular processing for files not in skip list
         for file in files:
             debug_print(f"  Processing file: {file.name}")
             show, season, episode, extras = extract_episode_info(file.stem)
@@ -1025,32 +803,51 @@ def plan_series_renames():
             })
             debug_print(f"Planned FULL RENAME: {file.name} -> {dest_path}")
 
+    # Process each group with the helper above
+    for group_key, files in series_files.items():
+        process_group(group_key, files)
+
+    # Persist any changes to imdb_cache
+    try:
+        save_imdb_cache(imdb_cache)
+    except Exception:
+        pass
+
 
 # --- Step 7: Rename (move) a single series file and its subtitles ---
 def organize_series(preview_only: bool, selected_files=None):
+    """Walk SERIES_DIR and rename/move each file in place.
+
+    This mirrors the behaviour used by the planning function but performs actual moves.
+    selected_files may be provided to only operate on a subset.
+    """
     show_id_map = {}
 
     try:
         for file in SERIES_DIR.rglob("*"):
+            # Skip non-video files and support filtered selections
             if not (file.is_file() and is_video_file(file)):
                 continue
             if selected_files and str(file) not in selected_files:
                 continue
 
+            # Extract episode components from the filename
             show, season, episode, extras = extract_episode_info(file.stem)
             if not show:
                 debug_print(f"❌ Skipping (unparsed): {file.name}")
                 continue
 
+            # Resolve show IMDb ID (may prompt user)
             imdb_id = get_or_prompt_show_imdb_id(show, file.parent.name, show_id_map)
-            # ep_id = get_episode_imdb_id(show, imdb_id, season, episode)
-            # dest_folder, dest_path = build_episode_path(file, show, season, episode, extras, imdb_id, ep_id)
+
+            # Determine episode IMDb ID (could be embedded in filename or resolved via cache/prompts)
             ep_imdb_id = get_episode_imdb_id_from_filename(file.stem)
             if ep_imdb_id:
                 ep_imdb_id = clean_brackets(ep_imdb_id)
             ep_id = ep_imdb_id if ep_imdb_id else get_episode_imdb_id(show, imdb_id, season, episode, file_stem=file.stem)
-            dest_folder, dest_path = build_episode_path(...)
 
+            # Build destination path using canonical metadata
+            dest_folder, dest_path = build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, original_file_stem=file.stem)
 
             print(f"\nEpisode: {file.relative_to(SERIES_DIR.parent)}\n -> {dest_path.relative_to(SERIES_DIR)}")
 
@@ -1078,11 +875,17 @@ def rename_series(src: Path, dest: Path):
 # --- Step 9: Batch GUI prompt for missing episode IDs (for edge/specials) ---
 def plan_series_renames_with_gui_prompts(root=None):
     from gui.episode_id_prompt import EpisodeIDPrompt
+    """Plan renames but prompt via GUI for missing episode IMDb IDs.
+
+    This function groups files by show+folder, fetches episode data from OMDb for known
+    shows, and opens a batch dialog to collect missing episode IDs when needed.
+    """
     planned = []
     show_id_map = {}
     show_files = {}
     manual_title_cache = load_manual_episode_title_cache()
     imdb_cache = {}
+
     # Load imdb_cache.json for folder-based lookup
     try:
         import json
@@ -1090,16 +893,17 @@ def plan_series_renames_with_gui_prompts(root=None):
             imdb_cache = json.load(f)
     except Exception:
         pass
-    # Collect all files by show
+
+    # Collect all files by (show, folder_name)
     for file in SERIES_DIR.rglob("*"):
         if not (file.is_file() and is_video_file(file)):
             continue
         show, season, episode, extras = extract_episode_info(file.stem)
         if not show:
             continue
-        # folder_name = file.parent.name
         folder_name = get_series_folder_name(file)
         show_files.setdefault((show, folder_name), []).append((file, season, episode, extras))
+
     # For each show, always use folder name to look up series IMDb ID, then prompt for missing episodes
     for (show, folder_name), files in show_files.items():
         # Prefer folder_name for imdb_cache lookup, fallback to show
@@ -1110,6 +914,7 @@ def plan_series_renames_with_gui_prompts(root=None):
                 debug_print(f"⏭️ Skipped fetching OMDb data for show: {show} (no IMDb ID)")
                 continue
         fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
+
         # Check for missing episodes
         missing_episodes = []
         episode_map = {}
@@ -1123,7 +928,8 @@ def plan_series_renames_with_gui_prompts(root=None):
                 missing_episodes.append((file, season, episode, extras))
             else:
                 episode_map[(season, episode)] = ep_id
-        # Batch prompt for missing episode IDs
+
+        # Batch prompt for missing episode IDs using the GUI prompt component
         if missing_episodes and root is not None:
             def on_submit(epid_map):
                 manual_episode_cache = load_manual_episode_cache()
@@ -1141,16 +947,9 @@ def plan_series_renames_with_gui_prompts(root=None):
             prompt_list = [f"S{season or 'X'}E{episode or 'X'}: {file.name}" for (file, season, episode, extras) in missing_episodes]
             prompt = EpisodeIDPrompt(root, f"{show} | Folder: {folder_name}", prompt_list, on_submit, file_names=[file.name for (file,_,_,_) in missing_episodes])
             root.wait_window(prompt)
+
+        # Build planned moves for this show's files
         for file, season, episode, extras in files:
-            # ep_id = None
-            # if file.stem in manual_title_cache:
-            #     ep_id = manual_title_cache[file.stem]
-            # elif season is not None and episode is not None:
-            #     ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file.stem)
-            # else:
-            #     ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file.stem)
-            # _, dest_path = build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, original_file_stem=file.stem)
-            # inside the for file, season, episode, extras in files:
             ep_id = None
             if file.stem in manual_title_cache:
                 ep_id = manual_title_cache[file.stem]
@@ -1158,7 +957,6 @@ def plan_series_renames_with_gui_prompts(root=None):
                 ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file.stem)
             else:
                 ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file.stem)
-            # now build
             _, dest_path = build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, original_file_stem=file.stem)
 
             if file.resolve() != dest_path.resolve():

@@ -3,12 +3,21 @@
 from pathlib import Path
 import difflib
 
+# def clean_brackets(text: str) -> str:
+#     """Remove surrounding brackets [] or () from a string if present."""
+#     cleaned = text.strip()
+#     if (cleaned.startswith("[") and cleaned.endswith("]")) or (cleaned.startswith("(") and cleaned.endswith("))")):
+#         cleaned = cleaned[1:-1].strip()
+#     return cleaned
+
 def clean_brackets(text: str) -> str:
     """Remove surrounding brackets [] or () from a string if present."""
-    cleaned = text.strip()
-    if (cleaned.startswith("[") and cleaned.endswith("]")) or (cleaned.startswith("(") and cleaned.endswith("))")):
-        cleaned = cleaned[1:-1].strip()
-    return cleaned
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
+    if (text.startswith("[") and text.endswith("]")) or (text.startswith("(") and text.endswith(")")):
+        return text[1:-1].strip()
+    return text
 
 def build_new_filename(title, year, extras, imdb_id, suffix):
     filename = f"{title} ({year})"
