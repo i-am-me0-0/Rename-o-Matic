@@ -34,12 +34,22 @@ def validate_and_sanitize_path(path_str):
     return str(Path(*sanitized_parts))
 
 
-def generate_preview():
+def generate_preview(root=None):
     import tkinter as tk
-    root = tk.Tk()
-    root.withdraw()  # Hide the root window
+    from config import debug_print
+    #debug_print("[DEBUG] generate_preview: started; root provided=" + str(bool(root)))
+    # If a root is provided (AppRoot in GUI mode), use it so prompts can be frame-based.
+    created_root = False
+    if root is None:
+        debug_print("[DEBUG] generate_preview: no root provided; creating temporary Tk root")
+        root = tk.Tk()
+        root.withdraw()  # Hide the root window
+        created_root = True
     planned = movies.plan_movie_renames() + plan_series_renames_with_gui_prompts(root)
-    root.destroy()
+    debug_print(f"[DEBUG] generate_preview: planned count={len(planned)}")
+    if created_root:
+        debug_print("[DEBUG] generate_preview: destroying temporary root")
+        root.destroy()
     if not planned:
         print("⚠️ No files to rename.!!")
     else:

@@ -1,6 +1,8 @@
 # gui/preview_window.py
+import os
 import tkinter as tk
 from actions.preview import generate_preview, execute_from_preview
+from config import debug_print
 from gui.planned_renames_viewer import PlannedRenamesFrame
 
 class PreviewWindow(tk.Frame):
@@ -41,21 +43,78 @@ class PreviewWindow(tk.Frame):
         import sys
         import os
         # Run manual_series_mode.py to generate blank planned renames
-        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "manual_series_mode.py")
-        subprocess.run([sys.executable, script_path])
+        # script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "manual_series_mode.py")
+        # subprocess.run([sys.executable, script_path])
+        from actions.manual_series_mode import main
+        main()
         # After completion, open batch edit window
         self.open_batch_edit()
 
     def do_generate(self):
+        debug_print("[DEBUG] PreviewWindow.do_generate: started")
         try:
-            generate_preview()
+            # Prefer running generate_preview with the AppRoot so prompts use frame-based flows
             try:
-                if self.status.winfo_exists():
-                    self.status.config(text="Preview generated.")
-                self.open_batch_edit()
-                # self.open_planned_renames()
+                from actions.omdb_gui_scraper import get_root
+                #debug_print("[DEBUG] PreviewWindow.do_generate: get_root() found; calling generate_preview with app root")
+                try:
+                    generate_preview(get_root())
+                    #debug_print("[DEBUG] PreviewWindow.do_generate: generate_preview returned (root path)")
+                except Exception as e:
+                    debug_print(f"[DEBUG] PreviewWindow.do_generate: generate_preview(root) failed: {e}; falling back to generate_preview()")
+                    # fallback to non-root generate
+                    generate_preview()
             except Exception:
-                pass
+                debug_print("[DEBUG] PreviewWindow.do_generate: get_root() unavailable; calling generate_preview()")
+                # If get_root isn't available, run CLI-style preview
+                generate_preview()
+
+            if self.status.winfo_exists():
+                self.status.config(text="Preview generated.")
+            debug_print("[DEBUG] PreviewWindow.do_generate: preview generated; attempting to re-show preview frame and open batch edit")
+
+            # Re-show the PreviewWindow in the main container (it may have been replaced
+            # by frame-based prompts during generation) so the main container is not left empty,
+            # then open the Batch Edit window on top.
+            try:
+                from actions.omdb_gui_scraper import get_root
+                #debug_print("[DEBUG] PreviewWindow.do_generate: attempting to re-create PreviewWindow in main container")
+                app_root = get_root()
+                # Use app_root.show_main_menu as the on_back target to avoid passing a bound
+                # method from the possibly destroyed previous PreviewWindow instance.
+                preview_frame = app_root.show_screen(PreviewWindow, on_back=app_root.show_main_menu)
+                debug_print(f"[DEBUG] PreviewWindow.do_generate: preview_frame created: {preview_frame}")
+                try:
+                    debug_print("[DEBUG] PreviewWindow.do_generate: opening batch edit from preview_frame")
+                    preview_frame.open_batch_edit()
+                    debug_print("[DEBUG] PreviewWindow.do_generate: batch edit opened")
+                except Exception as e:
+                    debug_print(f"[DEBUG] PreviewWindow.do_generate: preview_frame.open_batch_edit() failed: {e}; falling back to self.open_batch_edit()")
+                    # fallback to current instance
+                    try:
+                        self.open_batch_edit()
+                        debug_print("[DEBUG] PreviewWindow.do_generate: fallback self.open_batch_edit() succeeded")
+                    except Exception as e2:
+                        debug_print(f"[ERROR] PreviewWindow.do_generate: fallback self.open_batch_edit() failed: {e2}")
+
+                # --- Run test_planned_renames.py function if TEST env var is set ---
+                if os.environ.get("RENAMER_TEST_MODE") == "1":
+                    debug_print("[DEBUG] PreviewWindow.do_generate: RENAMER_TEST env detected, running test_planned_renames.run_test()")
+                    try:
+                        from test_planned_renames import run_test
+                        run_test()
+                    except Exception as e:
+                        debug_print(f"[ERROR] PreviewWindow.do_generate: test_planned_renames.run_test() failed: {e}")
+
+            except Exception as e:
+                debug_print(f"[DEBUG] PreviewWindow.do_generate: failed to re-create preview frame or open batch edit: {e}; attempting fallback open_batch_edit() on current frame")
+                # fallback behavior: open batch edit on current frame
+                try:
+                    self.open_batch_edit()
+                    debug_print("[DEBUG] PreviewWindow.do_generate: fallback open_batch_edit() succeeded")
+                except Exception as e3:
+                    debug_print(f"[ERROR] PreviewWindow.do_generate: fallback open_batch_edit() failed: {e3}")
+
         except Exception as e:
             try:
                 if self.status.winfo_exists():

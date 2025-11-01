@@ -930,7 +930,7 @@ def plan_series_renames_with_gui_prompts(root=None):
                 episode_map[(season, episode)] = ep_id
 
         # Batch prompt for missing episode IDs using the GUI prompt component
-        if missing_episodes and root is not None:
+        if missing_episodes:
             def on_submit(epid_map):
                 manual_episode_cache = load_manual_episode_cache()
                 for idx, (file, season, episode, extras) in enumerate(missing_episodes):
@@ -943,10 +943,44 @@ def plan_series_renames_with_gui_prompts(root=None):
                     if file.stem and ep_id:
                         manual_title_cache[file.stem] = ep_id
                         save_manual_episode_title_cache(manual_title_cache)
-                root.quit()
+                # If called with a hidden root (CLI), quit it; otherwise the caller handles continuation
+                try:
+                    if root is not None and not hasattr(root, 'show_screen'):
+                        root.quit()
+                except Exception:
+                    pass
+
             prompt_list = [f"S{season or 'X'}E{episode or 'X'}: {file.name}" for (file, season, episode, extras) in missing_episodes]
-            prompt = EpisodeIDPrompt(root, f"{show} | Folder: {folder_name}", prompt_list, on_submit, file_names=[file.name for (file,_,_,_) in missing_episodes])
-            root.wait_window(prompt)
+            # If running inside AppRoot (GUI mode), show a frame-based prompt and wait on a root-owned variable.
+            if root is not None and hasattr(root, 'show_screen'):
+                try:
+                    done_var = tk.BooleanVar(root)
+                    result_container = {}
+
+                    def _on_submit_frame(mapping):
+                        # Convert list-style mapping expected by frame to epid_map format
+                        result_container.update(mapping)
+                        done_var.set(True)
+
+                    # Show the frame inside the main screen container
+                    root.show_screen(EpisodeIDPromptFrame, f"{show} | Folder: {folder_name}", prompt_list, _on_submit_frame, file_names=[file.name for (file,_,_,_) in missing_episodes])
+                    root.wait_variable(done_var)
+                    # result_container now has mapping passed to _on_submit_frame
+                    on_submit(result_container)
+                except Exception:
+                    # Fallback to Toplevel prompt
+                    prompt = EpisodeIDPrompt(root, f"{show} | Folder: {folder_name}", prompt_list, on_submit, file_names=[file.name for (file,_,_,_) in missing_episodes])
+                    try:
+                        root.wait_window(prompt)
+                    except Exception:
+                        pass
+            else:
+                # CLI/standalone mode: keep using the Toplevel-based prompt
+                prompt = EpisodeIDPrompt(root, f"{show} | Folder: {folder_name}", prompt_list, on_submit, file_names=[file.name for (file,_,_,_) in missing_episodes])
+                try:
+                    root.wait_window(prompt)
+                except Exception:
+                    pass
 
         # Build planned moves for this show's files
         for file, season, episode, extras in files:

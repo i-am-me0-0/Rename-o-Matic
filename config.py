@@ -155,6 +155,15 @@ def debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 
+# UI-level temporary diagnostics (separate from LOG_LEVEL)
+# Enable by setting 'ui_debug' = true in the [General] section of config.ini
+UI_DEBUG = cfg["General"].get("ui_debug", "false").strip().lower() == "true"
+
+def ui_debug_print(*args, **kwargs):
+    if UI_DEBUG:
+        print(*args, **kwargs)
+
+
 
 
 def reload_config():

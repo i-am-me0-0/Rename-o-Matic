@@ -5,7 +5,7 @@
 # No threading is used in this module.
 
 # --- Imports and Config ---
-from config import MOVIES_DIR, MOVIE_FOLDER_LOCATION, CREATE_MOVIE_SUBFOLDERS
+from config import MOVIES_DIR, MOVIE_FOLDER_LOCATION, CREATE_MOVIE_SUBFOLDERS, ui_debug_print
 from core.file_utils import is_video_file, move_subtitles
 from core.info_extractors import extract_movie_info
 from undo import log_rename
@@ -15,6 +15,7 @@ from actions.omdb_gui_scraper import get_imdb_id_gui
 from core.media_metadata_cache import get_entry, set_entry, update_entry, load_metadata
 from actions.custom_imdb_web_poster_scraper import scrape_full_movie_metadata
 import re
+import tkinter as tk
 from config import SKIP_IMDB_IDS
 from core.movies_utils import clean_brackets, build_new_filename, get_destination_path, should_skip_file, get_title_diff
 
@@ -88,7 +89,7 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
     """
     from actions.omdb_gui_scraper import get_root
     from gui.app import AppRoot
-    matched = {'imdb_id': None, 'meta': None, 'found': False}
+    matched = {'imdb_id': None, 'meta': None, 'found': False, 'rescrape_later': False}
     movie_entries = [(mid, entry) for mid, entry in metadata.items() if entry.get('type') == 'movie']
     i = 0
     picker_break = False
@@ -106,104 +107,35 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
                 break
             # If year mismatches, prompt user for action
             elif entry.get('year') and orig_year and entry.get('year') != orig_year:
-                import tkinter as tk
-                user_choice = {'action': None, 'custom_id': None}
+                # Replace the old Toplevel prompt with a frame-based prompt
+                from gui.year_mismatch_prompt import YearMismatchPrompt
+                user_choice = {'action': None}
                 app_root = get_root()
-                # Build prompt window for year mismatch
-                prompt = tk.Toplevel(app_root)
-                prompt.title("Year Mismatch: Movie Metadata")
-                prompt.geometry("420x270")
-                msg = f"Filename: {file.name}\nTitle: {entry.get('title','')}\nYear in filename: {orig_year}\nYear in metadata: {entry.get('year','')}\nIMDb ID: {mid}\n\nUse this ID?"
-                label = tk.Label(prompt, text=msg, justify="left")
-                label.pack(pady=10)
-                btn_frame = tk.Frame(prompt)
-                btn_frame.pack(pady=10)
-                # Button callbacks for user actions
-                def on_yes():
-                    print(f"[DEBUG] User selected YES for {file.name} (ID: {mid})")
-                    user_choice['action'] = 'yes'
-                    prompt.destroy()
-                def on_no():
-                    print(f"[DEBUG] User selected SKIP for {file.name}")
-                    user_choice['action'] = 'no'
-                    prompt.destroy()
-                def on_rescrape():
-                    print(f"[DEBUG] User requested default rescrape window for {file.name}")
-                    user_choice['action'] = 'rescrape'
-                    prompt.destroy()
-                    try:
-                        # Open manual IMDb search picker
-                        from actions.omdb_gui_scraper import Picker, search_omdb
-                        picker_win = tk.Toplevel(app_root)
-                        picker_win.title("Manual IMDb Search")
-                        search_results = search_omdb(orig_title)
-                        picker = Picker(picker_win, file.name, orig_title, search_results)
-                        picker.pack(fill='both', expand=True)
-                        picker_win.wait_variable(picker.done_var)
-                        if getattr(picker, "skipped", False):
-                            print(f"[DEBUG] User skipped file {file.name} in manual picker.")
-                            picker_win.destroy()
-                            user_choice['action'] = 'no'
-                            user_choice['picked'] = False
-                            return
-                        if getattr(picker, "cancelled", False) or picker.cancelled:
-                            print(f"[DEBUG] User cancelled picker for {file.name}.")
-                            picker_win.destroy()
-                            user_choice['action'] = 'no'
-                            user_choice['picked'] = False
-                            return
-                        if getattr(picker, "selection", None):
-                            selected_imdb_id = picker.selection['imdbID']
-                            from actions.custom_imdb_web_poster_scraper import scrape_full_movie_metadata
-                            selected_meta = get_entry(selected_imdb_id)
-                            if not selected_meta:
-                                print(f"[DEBUG] Picker selected IMDb ID but no metadata found for {file.name}: {selected_imdb_id}, scraping...")
-                                scrape_full_movie_metadata(selected_imdb_id)
-                                selected_meta = get_entry(selected_imdb_id)
-                            if selected_meta:
-                                print(f"[DEBUG] Picker selected IMDb ID for {file.name}: {selected_imdb_id}")
-                            else:
-                                print(f"[DEBUG] Picker selected IMDb ID but scraping failed for {file.name}: {selected_imdb_id}")
-                            user_choice['selected_imdb_id'] = selected_imdb_id
-                            user_choice['selected_meta'] = selected_meta
-                            user_choice['picked'] = True
-                            picker_win.destroy()
-                        picker_win.destroy()
-                    except ImportError:
-                        print("[DEBUG] Could not import Picker for manual IMDb search!")
-                # Add buttons to prompt
-                yes_btn = tk.Button(btn_frame, text="Yes", width=10, command=on_yes)
-                yes_btn.pack(side="left", padx=5)
-                no_btn = tk.Button(btn_frame, text="Skip", width=10, command=on_no)
-                no_btn.pack(side="left", padx=5)
-                rescrape_btn = tk.Button(btn_frame, text="Rescrape this movie", width=18, command=on_rescrape)
-                rescrape_btn.pack(side="left", padx=5)
-                app_root.wait_window(prompt)
+                done_var = tk.BooleanVar()
+
+                def on_choice(action: str):
+                    ui_debug_print(f"[DEBUG] YearMismatchPrompt choice={action} for {file.name}")
+                    user_choice['action'] = action
+                    if action == 'rescrape':
+                        matched['rescrape_later'] = True
+                    done_var.set(True)
+
+                # Show the frame in the main screen container and wait
+                app_root.show_screen(YearMismatchPrompt, file.name, entry, mid, on_choice)
+                app_root.wait_variable(done_var)
                 # Handle user choice
                 if user_choice['action'] == 'no':
-                    print(f"[DEBUG] Skipping file {file.name} after prompt.")
+                    ui_debug_print(f"[DEBUG] Skipping file {file.name} after prompt.")
                     return matched
                 elif user_choice['action'] == 'yes':
-                    print(f"[DEBUG] Using existing metadata for {file.name} (ID: {mid})")
+                    ui_debug_print(f"[DEBUG] Using existing metadata for {file.name} (ID: {mid})")
                     matched['imdb_id'] = mid
                     matched['meta'] = entry
                     matched['found'] = True
                     break
                 elif user_choice['action'] == 'rescrape':
-                    if user_choice.get('picked'):
-                        sel_id = user_choice.get('selected_imdb_id')
-                        sel_meta = user_choice.get('selected_meta')
-                        if sel_id and sel_meta:
-                            matched['imdb_id'] = sel_id
-                            matched['meta'] = sel_meta
-                            matched['found'] = True
-                            print(f"[DEBUG] Applied picker selection for {file.name}: {sel_id}")
-                            break
-                        else:
-                            print(f"[DEBUG] Picker indicated a selection but metadata was not available for {file.name}.")
-                    else:
-                        print(f"[DEBUG] Manual IMDb search window should now be open for {file.name}")
-                        picker_break = True
+                    # Picker will be opened later in process_file
+                    picker_break = True
         if picker_break:
             break
     return matched
@@ -271,6 +203,21 @@ def process_file(file: Path, preview_only=False, rename_files=True, selected_fil
     imdb_id = matched['imdb_id']
     meta = matched['meta']
     found = matched['found']
+    # If year mismatch and rescrape requested, open picker now
+    if matched.get('rescrape_later'):
+        ui_debug_print(f"[DBG] movies.process_file: about to call get_imdb_id_gui(rescrape) for {file.name}")
+        try:
+            imdb_id = get_imdb_id_gui(file.name, search_title=orig_title, force_prompt=True)
+        except Exception as e:
+            print(f"[ERROR] movies.process_file: get_imdb_id_gui(rescrape) raised: {e}")
+            raise
+        ui_debug_print(f"[DBG] movies.process_file: get_imdb_id_gui(rescrape) returned: {imdb_id}")
+        if imdb_id:
+            meta = get_entry(imdb_id)
+            found = meta is not None
+        else:
+            meta = None
+            found = False
 
     # Skip if this is a series entry (not a movie)
     for mid, entry in metadata.items():
@@ -279,7 +226,13 @@ def process_file(file: Path, preview_only=False, rename_files=True, selected_fil
 
     # If not found, prompt user for IMDb ID
     if not found:
-        imdb_id = get_imdb_id_gui(file.name, search_title=orig_title)
+        ui_debug_print(f"[DBG] movies.process_file: about to call get_imdb_id_gui for {file.name}")
+        try:
+            imdb_id = get_imdb_id_gui(file.name, search_title=orig_title)
+        except Exception as e:
+            print(f"[ERROR] movies.process_file: get_imdb_id_gui raised: {e}")
+            raise
+        ui_debug_print(f"[DBG] movies.process_file: get_imdb_id_gui returned: {imdb_id}")
         if imdb_id:
             meta = get_entry(imdb_id)
     # If still no metadata, skip

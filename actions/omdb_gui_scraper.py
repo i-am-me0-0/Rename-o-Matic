@@ -38,7 +38,6 @@ def safe_request(func: Callable, *args: Any, message: str = "Loading...", delay:
     root = get_root()
     overlay = tk.Toplevel(root)
     overlay.transient(root)
-    overlay.grab_set()
     overlay.title("Please wait...")
     overlay.geometry("300x100+400+300")
 
@@ -46,7 +45,8 @@ def safe_request(func: Callable, *args: Any, message: str = "Loading...", delay:
     label.pack(expand=True, fill="both", pady=20)
 
     result: list[Any] = [None]
-    done_var = tk.BooleanVar()
+    # Make the variable owned by the app root so wait_variable works reliably
+    done_var = tk.BooleanVar(root)
 
     def run_request():
         try:
@@ -129,152 +129,11 @@ def search_omdb(title: str) -> List[Dict[str, Any]]:
         return []
 
 # ---- GUI Picker ----
-
-class Picker(tk.Frame):
-    def __init__(self, master: Any, original_line: str, search_title: str, results: List[Dict[str, Any]]):
-        super().__init__(master)
-        self.selection: Optional[dict[str, Any]] = None
-        self.cancelled = False
-        self.skipped = False  # <-- Add this line
-        # Only use the search_title for searching, but display original_line (filename/folder) visually
-        self.search_term = tk.StringVar(value=search_title)
-        self.results = results[:SEARCH_LIMIT]
-        self.original_line = original_line
-        self.make_widgets()
-        self.grab_set()
-        self.done_var = tk.BooleanVar(value=False)
-
-    def make_widgets(self):
-        # Show the original filename/folder visually, but do not prefill the search box with it
-        tk.Label(self, text=f"File/Folder: {self.original_line}", fg="gray", font=("Arial", 10, "italic"),
-                 anchor="w", wraplength=500, justify="left").pack(fill='x', padx=5, pady=(5, 0))
-
-        top_frame = tk.Frame(self)
-        top_frame.pack(fill='x', padx=5, pady=5)
-
-        tk.Entry(top_frame, textvariable=self.search_term, width=40).pack(side='left', padx=(0, 5))
-        tk.Button(top_frame, text="Search Again", command=self.manual_search).pack(side='left')
-        tk.Button(top_frame, text="Confirm Selection", command=self.confirm).pack(side='right')
-        tk.Button(top_frame, text="Skip", fg="blue", command=self.skip).pack(side='right', padx=(5, 0))
-        tk.Button(top_frame, text="Cancel", fg="red", command=self.cancel).pack(side='right', padx=(5, 10))
-
-        self.result_frame = tk.Frame(self)
-        self.result_frame.pack(fill='both', expand=True)
-        self.show_results(self.results)
-
-    def show_results(self, results: List[Dict[str, Any]]):
-        for widget in self.result_frame.winfo_children():
-            widget.destroy()
-
-        # Check if search_term looks like IMDb ID
-        manual_imdb_id = None
-        search_text = self.search_term.get().strip()
-        if re.match(r"tt\d{7,}", search_text, re.I):
-            manual_imdb_id = search_text
-
-        if not results and manual_imdb_id:
-            # No results, but show manual IMDb ID as the only selectable "result"
-            results = [{
-                'Title': f"Manual IMDb ID entry: {manual_imdb_id}",
-                'Year': '',
-                'imdbID': manual_imdb_id,
-                'Poster': None,
-            }]
-
-
-        for i, item in enumerate(results):
-            frame = tk.Frame(self.result_frame, bd=1, relief="solid", padx=5, pady=5)
-            frame.pack(fill='x', padx=5, pady=2)
-
-            if item.get('Poster') and item['Poster'] != 'N/A':
-                try:
-                    img_tk = safe_download_image(item['Poster'])
-                    if img_tk:
-                        img_label = tk.Label(frame, image=img_tk)
-                        # Store reference on the frame to avoid garbage collection (use setattr/getattr for type safety)
-                        refs = getattr(frame, '_img_refs', None)
-                        if refs is None:
-                            refs = []
-                            setattr(frame, '_img_refs', refs)
-                        refs.append(img_tk)
-                        img_label.pack(side='left', padx=5)
-                except Exception:
-                    tk.Label(frame, text="[No Image]").pack(side='left', padx=5)
-            else:
-                tk.Label(frame, text="[No Image]").pack(side='left', padx=5)
-
-            btn = tk.Radiobutton(
-                frame,
-                text=f"{item.get('Title', 'Unknown')} ({item.get('Year', 'N/A')})",
-                value=item.get('imdbID'),
-                indicatoron=False,
-                width=40,
-                command=lambda it=item: self.choose(it)
-            )
-            btn.pack(side='left', padx=10)
-
-            if i == 0:
-                self.selection = item
-                btn.select()
-
-    def choose(self, item: Dict[str, Any]):
-        self.selection = item
-
-    def manual_search(self):
-        query = self.search_term.get().strip()
-        if not query:
-            return
-        self.results = safe_request(search_omdb, query, message=f"Searching for '{query}'...")
-        self.show_results(self.results)
-
-    # def confirm(self):
-    #     self.done_var.set(True)
-    # def confirm(self):
-    #     # On confirm, check if search box is IMDb ID and override selection
-    #     search_text = self.search_term.get().strip()
-    #     if re.match(r"tt\d{7,}", search_text, re.I):
-    #         # Override selection ignoring the picked result
-    #         self.selection = {
-    #             'Title': f"Manual IMDb ID entry: {search_text}",
-    #             'Year': '',
-    #             'imdbID': search_text,
-    #             'Poster': None,
-    #         }
-    #     self.done_var.set(True)
-    def confirm(self):
-        search_text = self.search_term.get().strip()
-        if re.match(r"tt\d{7,}", search_text, re.I):
-            # Manual ID path
-            self.selection = {
-                'Title': '',
-                'Year': '',
-                'imdbID': search_text,
-                'Poster': None,
-            }
-            # Instead of manual popup, auto-scrape metadata
-            from actions.custom_imdb_web_poster_scraper import scrape_full_movie_metadata
-            scrape_full_movie_metadata(search_text)
-            self.done_var.set(True)
-        else:
-            self.done_var.set(True)
-
-    def skip(self):
-        self.selection = None
-        self.skipped = True  # <-- Set skipped flag
-        self.done_var.set(True)
-        self.destroy()
-
-
-    def cancel(self):
-        self.cancelled = True
-        root = get_root()
-        self.destroy()
-        if hasattr(root, "show_main_menu"):
-            root.show_main_menu()
+from gui.picker import Picker
 
 # ---- GUI Flow ----
 
-def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[str] = None) -> Optional[str]:
+def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[str] = None, force_prompt: bool = False) -> Optional[str]:
     """
     raw_line: The full filename or folder name (for display to user)
     search_title: The cleaned title for searching/caching (optional, will be parsed from raw_line if not provided)
@@ -284,8 +143,8 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
         search_title, _ = parse_title(raw_line)
     cached_id = imdb_cache.get(search_title)
 
-    # Only prompt if the cache is missing or the title/year is missing or mismatched
-    if cached_id:
+    # Only prompt if the cache is missing or the title/year is missing or mismatched, unless force_prompt is True
+    if cached_id and not force_prompt:
         # Use metadata cache to check for title/year
         meta = get_entry(cached_id)
         if meta and meta.get('title') and meta.get('year'):
@@ -295,27 +154,60 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
             return
 
     for attempt in range(max_retries):
+        debug_print(f"[DBG] get_imdb_id_gui: attempt {attempt+1}/{max_retries} for '{raw_line}' (search_title='{search_title}')")
         search_results = safe_request(search_omdb, search_title, message=f"Searching for '{search_title}'...")
+        debug_print(f"[DBG] get_imdb_id_gui: search returned {len(search_results)} results")
+        debug_print("[DBG] get_imdb_id_gui: showing Picker frame via show_screen")
         picker = get_root().show_screen(Picker, raw_line, search_title, search_results)
-        get_root().wait_variable(picker.done_var)
-
+        debug_print(f"[DBG] get_imdb_id_gui: picker created: {picker}; waiting for picker.done_var")
+        try:
+            get_root().wait_variable(picker.done_var)
+        except Exception as e:
+            debug_print(f"[ERROR] get_imdb_id_gui: wait_variable raised: {e}")
+            # Re-raise so caller can handle cancellation as before
+            raise
+        debug_print("[DBG] get_imdb_id_gui: picker.done_var set; reading picker state")
+        # Read data before destroying picker
+        result = None
+        # Log picker flags for diagnostics
+        debug_print(f"[DBG] picker state: skipped={getattr(picker, 'skipped', False)}, cancelled={getattr(picker, 'cancelled', False)}, selection={getattr(picker, 'selection', None)}")
         if getattr(picker, "skipped", False):
-            print(f"[INFO] User skipped file: {raw_line}")
-            return None
-        if picker.cancelled:
+            debug_print(f"[INFO] User skipped file: {raw_line}")
+            result = None
+        elif picker.cancelled:
+            debug_print(f"[INFO] User cancelled picker for: {raw_line}")
             raise KeyboardInterrupt("User cancelled IMDb matching.")
-        if picker.selection:
+        elif picker.selection:
             imdb_id = picker.selection['imdbID']
+            debug_print(f"[INFO] User selected imdbID={imdb_id} for '{raw_line}'")
             imdb_cache[search_title] = imdb_id
             save_cache()
-            # Only add to metadata cache if not a manual ID or if title/year filled
-            if not picker.search_term.get().strip().lower().startswith("tt"):
+            # If the user entered a manual IMDb ID (search term starting with 'tt'),
+            # perform the full scrape safely (off the immediate callback) so we
+            # populate the metadata cache without blocking the GUI.
+            if picker.search_term.get().strip().lower().startswith("tt"):
+                try:
+                    # use safe_request to run scraping with a "Please wait" overlay
+                    safe_request(scrape_full_movie_metadata, imdb_id, message=f"Scraping IMDb for {imdb_id}...")
+                except Exception:
+                    # If scraping fails, continue without blocking the selection flow
+                    pass
+            else:
+                # For regular selections fetched from OMDb, try to get title/year
                 data = fetch_title_and_year_from_imdb_id(imdb_id)
                 if data:
                     title_str, year_str = data
                     update_entry(imdb_id, {'title': title_str, 'year': year_str})
-            return imdb_id
-        print(f"[WARN] No valid selection on attempt {attempt + 1}/{max_retries}")
+            result = imdb_id
+        else:
+            print(f"[WARN] No valid selection on attempt {attempt + 1}/{max_retries}")
+        debug_print("[DBG] get_imdb_id_gui: destroying picker and continuing")
+        try:
+            picker.destroy()
+        except Exception as e:
+            debug_print(f"[ERROR] get_imdb_id_gui: error destroying picker: {e}")
+        if result is not None:
+            return result
 
     print(f"[INFO] Max retries reached for '{raw_line}'. Prompting manual IMDb ID entry.")
     fallback_id = manual_fallback_prompt(raw_line)
@@ -353,25 +245,48 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
                 return cached_id
 
     for attempt in range(max_retries):
+        debug_print(f"[DBG] get_series_imdb_id_gui: attempt {attempt+1}/{max_retries} for '{raw_line}' (search_title='{search_title}')")
         search_results = safe_request(search_omdb, search_title, message=f"Searching for series '{search_title}'...")
+        debug_print(f"[DBG] get_series_imdb_id_gui: search returned {len(search_results)} results")
+        debug_print("[DBG] get_series_imdb_id_gui: showing Picker frame via show_screen")
         picker = get_root().show_screen(Picker, raw_line, search_title, search_results)
-        get_root().wait_variable(picker.done_var)
-
+        debug_print(f"[DBG] get_series_imdb_id_gui: picker created: {picker}; waiting for picker.done_var")
+        try:
+            get_root().wait_variable(picker.done_var)
+        except Exception as e:
+            debug_print(f"[ERROR] get_series_imdb_id_gui: wait_variable raised: {e}")
+            raise
+        debug_print("[DBG] get_series_imdb_id_gui: picker.done_var set; reading picker state")
+        # Read data before destroying picker
+        result = None
+        debug_print(f"[DBG] picker state (series): skipped={getattr(picker, 'skipped', False)}, cancelled={getattr(picker, 'cancelled', False)}, selection={getattr(picker, 'selection', None)}")
         if picker.cancelled:
+            debug_print(f"[INFO] User cancelled series picker for: {raw_line}")
+            try:
+                picker.destroy()
+            except Exception as e:
+                debug_print(f"[ERROR] get_series_imdb_id_gui: error destroying picker after cancel: {e}")
             raise KeyboardInterrupt("User cancelled series matching.")
-
-        if picker.selection:
+        elif picker.selection:
             imdb_id = picker.selection.get('imdbID') or picker.selection.get('id')
             if imdb_id:
+                debug_print(f"[INFO] User selected series imdbID={imdb_id} for '{raw_line}'")
                 imdb_cache[search_title] = imdb_id
                 save_cache()
                 # Fetch and save title with years for metadata cache
                 data = fetch_title_and_year_from_imdb_id(imdb_id)
                 if data:
                     update_entry(imdb_id, {'title': data[0], 'year': data[1]})
-                return imdb_id
-
-        print(f"[WARN] No selection made for series (attempt {attempt + 1}/{max_retries})")
+                result = imdb_id
+        else:
+            print(f"[WARN] No selection made for series (attempt {attempt + 1}/{max_retries})")
+        debug_print("[DBG] get_series_imdb_id_gui: destroying picker and continuing")
+        try:
+            picker.destroy()
+        except Exception as e:
+            debug_print(f"[ERROR] get_series_imdb_id_gui: error destroying picker: {e}")
+        if result is not None:
+            return result
 
     print(f"[INFO] Max retries reached for '{raw_line}' (TV). Prompting manual entry.")
     fallback_id = manual_fallback_prompt(raw_line)
@@ -395,7 +310,7 @@ def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[in
     for season in range(1, 100):
         params = {'apikey': OMDB_API_KEY, 'i': series_imdb_id, 'Season': season}
         try:
-            response = safe_request(requests.get, "http://www.omdbapi.com/", params=params, timeout=5, message=f"Fetching Season {season}...")
+            response = safe_request(requests.get, "http://www.omdbapi.com/", params=params, timeout=5, message=f"Fetching Season {season} for {series_imdb_id}...")
             data = response.json() if isinstance(response, requests.Response) else response
 
             if data.get('Response') != 'True' or 'Episodes' not in data:
