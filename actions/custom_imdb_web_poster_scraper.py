@@ -274,13 +274,25 @@ def scrape_full_movie_metadata(imdb_id: str) -> dict:
         # Poster URL
         poster_url = fetch_poster_url(imdb_id)
         # Compose entry
+        # If the media cache already has an episodes map for this IMDb ID, prefer preserving 'series' type
+        try:
+            existing = get_entry(imdb_id) or {}
+        except Exception:
+            existing = {}
+
         entry = {
             "title": title,
             "year": year,
-            "type": "movie",
             "summary": summary,
             "poster_url": poster_url or ""
         }
+        # Only set type to 'movie' if there is no episodes map present
+        if not existing.get('episodes'):
+            entry['type'] = 'movie'
+        else:
+            # preserve existing type (likely 'series')
+            entry['type'] = existing.get('type', 'movie')
+
         update_entry(imdb_id, entry)
         print(f"[SCRAPED] Metadata for {imdb_id} added to cache.")
         return entry

@@ -1,7 +1,9 @@
 import json
 import sys
+import difflib
 from pathlib import Path
 from typing import List, Dict, Any
+import re
 
 from config import PLANNED_RENAMES_FILE, MOVIES_DIR, SERIES_DIR, debug_print
 
@@ -22,24 +24,28 @@ STATIC_MOVIES = [
 ]
 
 STATIC_SERIES = [
+    "Reacher (2022–) [tt9288030]/Season 03/Reacher - S03E07 [L.A. Story 720p WEB-DL x265 10Bit] [tt34929210].mkv",
+    "DuckTales (2017–2021) [tt5531466]/Season 01/DuckTales - S01E11 [Beware the B.U.D.D.Y. System! 720p WEB-HD x264] [tt8228740].mkv",
+    "DuckTales (2017–2021) [tt5531466]/Season 01/DuckTales - S01E17 [From the Confidental Casefiles of Agent 22! - From the Confidential Casefiles of Agent 22 720p WEB-HD x264] [tt8373296].mkv",
+    "DuckTales (2017–2021) [tt5531466]/Season 02/DuckTales - S02E07 [Whatever Happened to Della Duck! 720p WEB-HD x264] [tt9313942].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 00/Meta Runner - S00E22 [Meta Runner Season 1 (Full Movie Cut) - 720p WEB-DL x265] [tt13134916].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 01/Meta Runner - S01E01 [Wrong Warp - Data Stream 720p WEB-DL x265] [tt10696624].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 01/Meta Runner - S01E02 [Out of Bounds - Game Over 720p WEB-DL x265] [tt10756490].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 02/Meta Runner - S02E01 [Hard Reset - Restart - 1080p BluRay x264] [tt13292040].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 02/Meta Runner - S02E02 [Firewall - 1080p BluRay x264] [tt13327702].mkv",
-    "Scorpion (2014) [tt3514324]/Season 01/Scorpion - S01E07 [Father's Day 720p BluRay x264] [tt4089098].mkv",
-    "Scorpion (2014) [tt3514324]/Season 02/Scorpion - S02E18 [The Fast & the Nerdiest 720p WEB-DL x265] [tt5376432].mkv",
-    "Scorpion (2014) [tt3514324]/Season 03/Scorpion - S03E01 [E02 Civil War and More Civil War 720p WEB-DL x265] [tt5582700]].mkv",
-    "Scorpion (2014) [tt3514324]/Season 03/Scorpion - S03E12 [Ice Ca-Cabes 720p WEB-DL x265] [tt6198388].mkv",
-    "MacGyver (2016) [tt1399045]/Season 02/MacGyver - S02E04 [X-Ray + Penny - X-Ray and Penny 720p WEB-HD x265] [tt7234624].mkv",
+    "Scorpion (2014–2018) [tt3514324]/Season 01/Scorpion - S01E07 [Father's Day 720p BluRay x264] [tt4089098].mkv",
+    "Scorpion (2014–2018) [tt3514324]/Season 02/Scorpion - S02E18 [The Fast & the Nerdiest 720p WEB-DL x265] [tt5376432].mkv",
+    "Scorpion (2014–2018) [tt3514324]/Season 03/Scorpion - S03E01 [E02 Civil War and More Civil War 720p WEB-DL x265] [tt5582700]].mkv",
+    "Scorpion (2014–2018) [tt3514324]/Season 03/Scorpion - S03E12 [Ice Ca-Cabes 720p WEB-DL x265] [tt6198388].mkv",
+    "MacGyver (2016–2021) [tt1399045]/Season 02/MacGyver - S02E04 [X-Ray + Penny - X-Ray and Penny 720p WEB-HD x265] [tt7234624].mkv",
     "Knight Rider (2008–2009) [tt1213404]/Season 01/Knight Rider - S01E01 [A Knight in Shining Armor - knight Pilot 720p BluRay x264] [tt1236283].mkv",
     "Knight Rider (2008–2009) [tt1213404]/Season 01/Knight Rider - S01E02 [Journey to the End of the Knight - knight 720p BluRay x264] [tt1236288].mkv",
     "Knight Rider (1982–1986) [tt0083437]/Season 01/Knight Rider - S01E01 [Knight of the Phoenix - Part 1 - Pilot 720p BluRay x264] [tt0084218].mkv",
     "Knight Rider (1982–1986) [tt0083437]/Season 01/Knight Rider - S01E02 [Knight of the Phoenix - Part 2 - Deadly Maneuvers 720p BluRay x264] [tt2388039].mkv",
-    "Friends (1994) [tt0108778]/Season 02/Friends - S02E01 [The One with Ross's New Girlfriend 1900] [tt0583562].mkv",
-    "Friends (1994) [tt0108778]/Season 02/Friends - S02E02 [The One with the Breast Milk 1900] [tt0583583].mkv",
-    "Friends (1994) [tt0108778]/Season 01/Friends - S01E01 [The One Where Monica Gets a Roommate - 720p] [tt0583459].mkv",
-    "Friends (1994) [tt0108778]/Season 01/Friends - S01E02 [The One with the Sonogram at the End - The One with the Sonogram 1900] [tt0583647].mkv",
+    "Friends (1994–2004) [tt0108778]/Season 02/Friends - S02E01 [The One with Ross's New Girlfriend 1900] [tt0583562].mkv",
+    "Friends (1994–2004) [tt0108778]/Season 02/Friends - S02E02 [The One with the Breast Milk 1900] [tt0583583].mkv",
+    "Friends (1994–2004) [tt0108778]/Season 01/Friends - S01E01 [The One Where Monica Gets a Roommate - 720p] [tt0583459].mkv",
+    "Friends (1994–2004) [tt0108778]/Season 01/Friends - S01E02 [The One with the Sonogram at the End - The One with the Sonogram 1900] [tt0583647].mkv",
 ]
 
 # If True, print detailed per-item matches. If False, print only the concise
@@ -93,21 +99,76 @@ def best_candidate_and_highlight(rel: str, candidates: list) -> str:
     candidate vs actual with differing part highlighted. If no candidates, return rel."""
     if not candidates:
         return rel
+    # Prefer highest similarity ratio (difflib). Tiebreaker: longest common prefix.
     best = None
-    best_len = -1
+    best_score = -1.0
+    best_prefix = -1
     for c in candidates:
-        # compute common prefix length
+        try:
+            score = difflib.SequenceMatcher(None, rel, c).ratio()
+        except Exception:
+            score = 0.0
+        # compute common prefix length as tiebreaker
         L = 0
         m = min(len(rel), len(c))
         while L < m and rel[L] == c[L]:
             L += 1
-        if L > best_len:
-            best_len = L
+        if score > best_score or (abs(score - best_score) < 1e-9 and L > best_prefix):
+            best_score = score
             best = c
+            best_prefix = L
     if best is None:
         return rel
     a_h, b_h = highlight_mismatch(best, rel)
     return f"expected: {a_h}\nactual:   {b_h}"
+
+
+def best_candidate_raw(rel: str, candidates: list) -> str:
+    """Return the single best candidate string (no highlighting). Uses difflib ratio + prefix tiebreaker."""
+    if not candidates:
+        return ''
+    best = None
+    best_score = -1.0
+    best_prefix = -1
+    for c in candidates:
+        try:
+            score = difflib.SequenceMatcher(None, rel, c).ratio()
+        except Exception:
+            score = 0.0
+        L = 0
+        m = min(len(rel), len(c))
+        while L < m and rel[L] == c[L]:
+            L += 1
+        if score > best_score or (abs(score - best_score) < 1e-9 and L > best_prefix):
+            best_score = score
+            best = c
+            best_prefix = L
+    return best or ''
+
+
+def word_diff_highlight(expected: str, actual: str) -> (str, str):
+    """Return (expected_h, actual_h) where only differing words are colored red.
+
+    Uses difflib.ndiff on word tokens; equal words are left as-is, words present only
+    in expected are colored in the expected string, words present only in actual are
+    colored in the actual string.
+    """
+    exp_words = re.findall(r"\S+", expected)
+    act_words = re.findall(r"\S+", actual)
+    diff = list(difflib.ndiff(exp_words, act_words))
+    exp_out = []
+    act_out = []
+    for line in diff:
+        code = line[:2]
+        token = line[2:]
+        if code == '  ':
+            exp_out.append(token)
+            act_out.append(token)
+        elif code == '- ':
+            exp_out.append(color_text(token, RED))
+        elif code == '+ ':
+            act_out.append(color_text(token, RED))
+    return ' '.join(exp_out), ' '.join(act_out)
 
 
 def _strip_prefix(path_str: str, prefix: str) -> str:
@@ -218,9 +279,24 @@ def run_test(names: List[str] = None) -> int:
 
     def rel_under(to_posix: str, key: str) -> str:
         parts = [p for p in to_posix.split('/') if p]
+        # 1) exact component match (e.g. 'series' or 'movies')
         for i, p in enumerate(parts):
             if p.lower() == key:
                 return '/'.join(parts[i+1:])
+        # 2) try to strip known configured prefix (MOVIES_DIR / SERIES_DIR)
+        try:
+            pref = SERIES_DIR if key == 'series' else MOVIES_DIR
+            pref_norm = str(pref).replace('\\', '/').lstrip('/').lower()
+            tp = to_posix.replace('\\', '/').lstrip('/')
+            if tp.lower().startswith(pref_norm + '/'):
+                return tp[len(pref_norm) + 1:]
+        except Exception:
+            pass
+        # 3) fallback: if a path segment contains the keyword (e.g. '.series'), strip from there
+        for i, p in enumerate(parts):
+            if key in p.lower():
+                return '/'.join(parts[i+1:])
+        # 4) give up and return joined parts
         return '/'.join(parts)
 
     matches_movies = {m: [] for m in movies_to_check}
@@ -228,43 +304,185 @@ def run_test(names: List[str] = None) -> int:
     unmatched_movies = []
     unmatched_series = []
 
+    # Phase 1: build candidate lists for each planned entry (exact component-wise contiguous match)
+    movie_candidates_per_planned: Dict[int, List[str]] = {}
+    series_candidates_per_planned: Dict[int, List[str]] = {}
+
     for idx, item in enumerate(planned):
         to_path = item.get('to', '')
         to_posix = str(to_path).replace('\\', '/').lstrip('/')
         typ = item.get('type', '').lower()
         if typ == 'movie':
             rel = rel_under(to_posix, 'movies')
-            matched = False
+            rel_parts = [p for p in rel.split('/') if p]
+            cands: List[str] = []
             for m in movies_to_check:
-                # exact match, case-sensitive as requested
-                if rel == m:
-                    matches_movies[m].append({'index': idx, 'item': item, 'rel': rel})
-                    matched = True
-                    break
-            if not matched:
-                unmatched_movies.append({'index': idx, 'item': item, 'rel': rel})
+                m_parts = [p for p in m.replace('\\', '/').split('/') if p]
+                if not m_parts:
+                    continue
+                matched_flag = False
+                for i in range(0, len(rel_parts) - len(m_parts) + 1):
+                    if rel_parts[i:i + len(m_parts)] == m_parts:
+                        cands.append(m)
+                        matched_flag = True
+                        break
+                if VERBOSE_DETAILS:
+                    status = 'MATCH' if matched_flag else 'no'
+                    print(f"[verbose] planned idx={idx} movie_rel='{rel}' compared to provided='{m}' -> {status}")
+            movie_candidates_per_planned[idx] = cands
         elif typ == 'series':
             rel = rel_under(to_posix, 'series')
-            matched = False
+            rel_parts = [p for p in rel.split('/') if p]
+            cands: List[str] = []
             for s in series_to_check:
-                # exact match, case-sensitive
-                if rel == s:
-                    matches_series[s].append({'index': idx, 'item': item, 'rel': rel})
-                    matched = True
-                    break
-            if not matched:
-                unmatched_series.append({'index': idx, 'item': item, 'rel': rel})
+                s_parts = [p for p in s.replace('\\', '/').split('/') if p]
+                if not s_parts:
+                    continue
+                matched_flag = False
+                for i in range(0, len(rel_parts) - len(s_parts) + 1):
+                    if rel_parts[i:i + len(s_parts)] == s_parts:
+                        cands.append(s)
+                        matched_flag = True
+                        break
+                if VERBOSE_DETAILS:
+                    status = 'MATCH' if matched_flag else 'no'
+                    print(f"[verbose] planned idx={idx} series_rel='{rel}' compared to provided='{s}' -> {status}")
+            series_candidates_per_planned[idx] = cands
 
-    print(f"Total planned entries: {len(planned)}")
-    print(f"Movies to check (count of provided movie names/keys to verify): {len(movies_to_check)}")
-    print(f"Series to check (count of provided series names/keys to verify): {len(series_to_check)}\n")
+    # Helper: common prefix length for tie-breaking
+    def common_prefix_len(a: str, b: str) -> int:
+        m = min(len(a), len(b))
+        i = 0
+        while i < m and a[i] == b[i]:
+            i += 1
+        return i
+
+    # Assignment: use maximum bipartite matching (Kuhn) so each provided name can be used at most once
+    def max_bipartite_assign(candidates_per_planned: Dict[int, List[str]],
+                             provided_list: List[str],
+                             strip_key: str) -> (Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]):
+        # Map provided names to indices
+        prov_index = {p: i for i, p in enumerate(provided_list)}
+        n_prov = len(provided_list)
+
+        # Build adjacency: for each planned idx -> list of prov indices
+        adj: Dict[int, List[int]] = {}
+        for idx, cands in candidates_per_planned.items():
+            adj[idx] = [prov_index[c] for c in cands if c in prov_index]
+
+        # Kuhn (DFS) for maximum matching
+        prov_match = [-1] * n_prov  # prov_match[j] = planned_idx assigned to provided j
+
+        def try_khun(u: int, seen: List[bool]) -> bool:
+            for v in adj.get(u, []):
+                if seen[v]:
+                    continue
+                seen[v] = True
+                if prov_match[v] == -1 or try_khun(prov_match[v], seen):
+                    prov_match[v] = u
+                    return True
+            return False
+
+        # attempt to match each planned node
+        for u in list(adj.keys()):
+            seen = [False] * n_prov
+            try_khun(u, seen)
+
+        # Build assigned_by_provided and unmatched lists
+        assigned_by_provided: Dict[str, List[Dict[str, Any]]] = {p: [] for p in provided_list}
+        matched_planned = set()
+
+        for prov, p_idx in enumerate(prov_match):
+            if p_idx != -1:
+                pname = provided_list[prov]
+                item = planned[p_idx]
+                to_path = item.get('to', '')
+                rel = rel_under(str(to_path).replace('\\', '/').lstrip('/'), strip_key)
+                assigned_by_provided[pname].append({'index': p_idx, 'item': item, 'rel': rel})
+                matched_planned.add(p_idx)
+
+        unmatched: List[Dict[str, Any]] = []
+        # Only consider planned indices that were part of this candidates_per_planned (same type)
+        for idx in candidates_per_planned.keys():
+            if idx in matched_planned:
+                continue
+            item = planned[idx]
+            to_path = item.get('to', '')
+            rel = rel_under(str(to_path).replace('\\', '/').lstrip('/'), strip_key)
+            # include candidate list for diagnostics
+            cands = candidates_per_planned.get(idx, [])
+            unmatched.append({'index': idx, 'item': item, 'rel': rel, 'candidates': cands})
+
+        return assigned_by_provided, unmatched
+
+    # Do assignments using bipartite matching
+    assigned_movies, unmatched_movies = max_bipartite_assign(movie_candidates_per_planned, movies_to_check, 'movies')
+    assigned_series, unmatched_series = max_bipartite_assign(series_candidates_per_planned, series_to_check, 'series')
+
+    matches_movies = assigned_movies
+    matches_series = assigned_series
+
+    # Print only concise unmatched info (less noisy): show planned filename and closest expected key
+    def print_unmatched_list(unmatched_list, static_list, kind_label: str):
+        if not unmatched_list:
+            return
+        emoji = '🔴'
+        print(f"\n{emoji} Unmatched {kind_label} entries ({len(unmatched_list)}):")
+        for p in unmatched_list:
+            item = p['item']
+            rel = p.get('rel') or ''
+            planned_full = item.get('to')
+            candidates = p.get('candidates', [])
+            closest = best_candidate_raw(rel, static_list) if candidates else ''
+            # concise colored output: Planned (red), Closest expected (green)
+            planned_line = color_text(f"Planned: {planned_full}", RED)
+            if closest:
+                expected_line = color_text(f"Expected (closest): {closest}", GREEN)
+            else:
+                expected_line = color_text("Expected (closest): <none>", RED)
+            print(f"  - idx={p['index']} {planned_line}")
+            print(f"    {expected_line}")
+
+    # Movies then series: print a compact validation summary + unmatched details with word diffs
     matched_movies_count = sum(len(v) for v in matches_movies.values())
     matched_series_count = sum(len(v) for v in matches_series.values())
-    print(f"Movie entries matched: {matched_movies_count}")
-    print(f"Series entries matched: {matched_series_count}")
-    print(f"Total matches: {matched_movies_count + matched_series_count}\n")
-    print(f"Movie entries unmatched: {len(unmatched_movies)}")
-    print(f"Series entries unmatched: {len(unmatched_series)}")
+    total_matches = matched_movies_count + matched_series_count
+
+    icon = ""
+    if total_matches == len(planned):
+        icon = "✅"
+    else: 
+        icon = "❌"
+
+    print("\n--------Validation Summary--------------")
+    print(f"Planned entries: {len(planned)}")
+    print(f"Movies checked: {len(movies_to_check)}\t✅ Matches: {matched_movies_count}\t❌ Unmatched: {len(unmatched_movies)}")
+    print(f"Series checked: {len(series_to_check)}\t✅ Matches: {matched_series_count}\t❌ Unmatched: {len(unmatched_series)}")
+    print(f"Overall matches: {total_matches} / {len(planned)} {icon}\n")
+
+    # Unmatched details (series then movies)
+    if unmatched_series:
+        print(f"------Unmatched Series ({len(unmatched_series)})---------")
+        for p in unmatched_series:
+            rel = p.get('rel') or ''
+            planned_full = p['item'].get('to')
+            expected = best_candidate_raw(rel, STATIC_SERIES) or ''
+            # remove leading testLibrary/... if present in planned_full for display
+            actual = rel
+            exp_h, act_h = word_diff_highlight(expected, actual)
+            print(f"expected: {exp_h}")
+            print(f"actual:   {act_h}\n")
+
+    if unmatched_movies:
+        print(f"------Unmatched Movies ({len(unmatched_movies)})---------")
+        for p in unmatched_movies:
+            rel = p.get('rel') or ''
+            planned_full = p['item'].get('to')
+            expected = best_candidate_raw(rel, STATIC_MOVIES) or ''
+            actual = rel
+            exp_h, act_h = word_diff_highlight(expected, actual)
+            print(f"expected: {exp_h}")
+            print(f"actual:   {act_h}\n")
 
     # Overall status icon
     overall_ok = (len(unmatched_movies) == 0 and len(unmatched_series) == 0)
@@ -273,23 +491,7 @@ def run_test(names: List[str] = None) -> int:
     else:
         print(color_text('✗ Some planned entries did not match', RED))
 
-    if unmatched_movies:
-        print("Unmatched movie planned entries (sample up to 20):")
-        for p in unmatched_movies[:20]:
-            item = p['item']
-            rel = p.get('rel')
-            # show best candidate and highlight mismatch
-            snippet = best_candidate_and_highlight(rel, STATIC_MOVIES)
-            print(f"  - idx={p['index']} to={item.get('to')}")
-            print(f"    {snippet}")
-    if unmatched_series:
-        print("Unmatched series planned entries (sample up to 20):")
-        for p in unmatched_series[:20]:
-            item = p['item']
-            rel = p.get('rel')
-            snippet = best_candidate_and_highlight(rel, STATIC_SERIES)
-            print(f"  - idx={p['index']} to={item.get('to')}")
-            print(f"    {snippet}")
+    # (Detailed per-unmatched listing removed; compact validation summary above is used.)
 
     if VERBOSE_DETAILS:
         print("\nMatches by provided movie:")

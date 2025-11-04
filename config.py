@@ -37,10 +37,12 @@ DEFAULTS = {
         "default_include": "1",           # or "0"
         "create_movie_subfolders": "False",  # or False
         "log_level": "info",  # or "debug", "warning", "error", "critical"
-        "prepend_episode_title_to_extras": "True"  # or False
+        "prepend_episode_title_to_extras": "True",  # or False
+        "ui_debug": "False"
     },
     "OMDb": {
         "omdb_api_key": "key",
+        "omdb_base_url": "http://www.omdbapi.com/",
         "omdb_request_delay": "0.2",
         "omdb_search_limit": "5",
         "user_agents": '"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/114.0.0.0 Safari/537.36, Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"'
@@ -113,7 +115,9 @@ MOVIE_FOLDER_LOCATION = cfg["General"].get("movie_folder_location", "root").stri
 DEFAULT_INCLUDE = cfg["General"].get("default_include", "1").strip()
 PREPEND_EPISODE_TITLE_TO_EXTRAS = cfg["General"].get("prepend_episode_title_to_extras", "True").strip().lower()
 
+# OMDb API config
 OMDB_API_KEY = cfg["OMDb"].get("omdb_api_key", "key").strip()
+OMDB_BASE_URL = cfg["OMDb"].get("omdb_base_url", "http://www.omdbapi.com/").strip()
 OMDB_REQUEST_DELAY = float(cfg["OMDb"].get("omdb_request_delay", "0.2"))
 OMDB_SEARCH_LIMIT = int(cfg["OMDb"].get("omdb_search_limit", "5"))
 USER_AGENTS = [ua.strip().strip('"') for ua in cfg["OMDb"].get("user_agents", "").split(",") if ua.strip()]

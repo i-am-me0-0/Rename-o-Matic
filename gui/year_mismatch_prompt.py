@@ -7,10 +7,11 @@ from PIL import Image, ImageTk
 
 
 class YearMismatchPrompt(tk.Frame):
-    def __init__(self, master: Any, filename: str, entry: dict, imdb_id: str, on_choice: Callable[[str], None]):
+    def __init__(self, master: Any, filename: str, entry: dict, imdb_id: str, on_choice: Callable[[str], None] ):
         super().__init__(master)
         self.on_choice = on_choice
         self._poster_img = None
+        self.filename = filename
 
         # Layout: left = poster, right = details + buttons
         top = tk.Frame(self)
@@ -41,10 +42,15 @@ class YearMismatchPrompt(tk.Frame):
         yes_btn.pack(side="left", padx=5)
         no_btn = tk.Button(btn_frame, text="Skip", width=10, command=lambda: self._choose('no'))
         no_btn.pack(side="left", padx=5)
+
         rescrape_btn = tk.Button(btn_frame, text="Rescrape this movie", width=18, command=lambda: self._choose('rescrape'))
         rescrape_btn.pack(side="left", padx=5)
 
-        # If the passed entry doesn't contain a poster_url, try to fetch it from the media metadata cache
+        # Add 'Use Existing Cache' button
+        use_cache_btn = tk.Button(btn_frame, text="Use Existing Cache", width=18, command=lambda: self._choose('use_cache'))
+        use_cache_btn.pack(side="left", padx=5)
+
+        # Try to display poster image if available
         poster_url = entry.get('poster_url') if entry else None
         if not poster_url:
             try:
@@ -55,7 +61,6 @@ class YearMismatchPrompt(tk.Frame):
                 poster_url = None
 
         if poster_url:
-            # Download in background thread and update image in main thread
             def _download_and_set():
                 try:
                     resp = requests.get(poster_url, timeout=6)
@@ -71,6 +76,10 @@ class YearMismatchPrompt(tk.Frame):
                     pass
             t = threading.Thread(target=_download_and_set, daemon=True)
             t.start()
+
+    def _open_cache_picker(self):
+        # No longer used; picker is now opened from movies.py
+        pass
 
     def _choose(self, action: str):
         try:

@@ -41,11 +41,15 @@ def should_skip_due_to_imdb_id(file, imdb_id_in_name, skipped):
     meta = get_entry(imdb_id_in_name)
     from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id, fetch_episode_ids_omdb
     if not meta:
-        # Fetch metadata depending on whether it's a series or movie
-        if 'S01E' in file.stem or 'season' in file.stem.lower():
-            fetch_title_and_year_from_imdb_id(imdb_id_in_name)
-        else:
-            scrape_full_movie_metadata(imdb_id_in_name)
+        # Fetch metadata via OMDb first (safer canonical typing); populate episodes if it looks like a series
+        try:
+            fetch_title_and_year_from_imdb_id(imdb_id_in_name, populate_episodes=True, fetch_poster=False)
+        except Exception:
+            # Fallback to the HTML scraper if OMDb fails
+            try:
+                scrape_full_movie_metadata(imdb_id_in_name)
+            except Exception:
+                pass
         meta = get_entry(imdb_id_in_name)
     if meta and meta.get('type') == 'series':
         # For series, fetch episode IDs as well
@@ -72,12 +76,32 @@ def ensure_metadata_for_cache(debug_print, get_meta_entry):
     except Exception:
         imdb_cache = {}
     for title, imdbid in imdb_cache.items():
-        if imdbid and not get_meta_entry(imdbid):
+        if not imdbid:
+            continue
+        meta_now = get_meta_entry(imdbid)
+        # Fetch if metadata missing entirely, or title/year missing
+        if not meta_now or not meta_now.get('title') or not meta_now.get('year'):
             debug_print(f"[DEBUG] Fetching missing metadata for {title} ({imdbid}) from imdb_cache...")
-            if 'S01E' in title or 'season' in title.lower():
-                fetch_title_and_year_from_imdb_id(imdbid)
-            else:
-                scrape_full_movie_metadata(imdbid)
+            # Use OMDb-based fetch which correctly reports type (movie/series) and totalSeasons.
+            # The previous heuristic (looking for 'S01E' or 'season' in the title) misclassified
+            # folder-based keys like 'Ducktales 2017' as movies and caused scraper to write
+            # movie-only metadata. Always use OMDb first to get canonical type/year information.
+            try:
+                # Fetch show/movie metadata via OMDb. Populate episodes and avoid extra poster scraping
+                fetch_title_and_year_from_imdb_id(imdbid, populate_episodes=True, fetch_poster=False)
+                # fetch_title_and_year_from_imdb_id will persist totalSeasons and episodes when appropriate
+            except Exception:
+                # Fallback to the HTML scraper if OMDb fails
+                try:
+                    scrape_full_movie_metadata(imdbid)
+                except Exception:
+                    pass
+            except Exception:
+                # Fallback to the HTML scraper if OMDb fails
+                try:
+                    scrape_full_movie_metadata(imdbid)
+                except Exception:
+                    pass
 
 
 # --- Movie Metadata Matching and User Prompting ---
@@ -114,10 +138,58 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
                 done_var = tk.BooleanVar()
 
                 def on_choice(action: str):
-                    ui_debug_print(f"[DEBUG] YearMismatchPrompt choice={action} for {file.name}")
+                    ui_debug_print(f"[DEBUG] YearMismatchPrompt choice={action} (type={type(action)}) for {file.name}")
                     user_choice['action'] = action
                     if action == 'rescrape':
                         matched['rescrape_later'] = True
+                    elif action == 'use_cache':
+                        ui_debug_print(f"[DEBUG] Opening cache picker for {file.name}")
+                        try:
+                            from gui.existing_cache_picker import ExistingCachePickerFrame
+                            app_root = get_root()
+                            picker_done = tk.BooleanVar()
+                            selected_id = {'imdb_id': None}
+                            def picker_callback(imdb_id):
+                                ui_debug_print(f"[DEBUG] Cache picker returned imdb_id={imdb_id} (type={type(imdb_id)}) for {file.name}")
+                                selected_id['imdb_id'] = imdb_id
+                                picker_done.set(True)
+                            filter_type = entry.get('type') if entry and 'type' in entry else None
+                            top = tk.Toplevel(app_root)
+                            top.title("Pick Existing Cache Entry")
+                            top.geometry("500x400+200+200")
+                            frame = ExistingCachePickerFrame(top, file.name, mid or '', picker_callback, filter_type=filter_type)
+                            frame.pack(fill='both', expand=True)
+                            top.transient(app_root.winfo_toplevel())
+                            top.grab_set()
+                            app_root.wait_variable(picker_done)
+                            try:
+                                top.destroy()
+                            except Exception:
+                                pass
+                            imdb_id_selected = selected_id['imdb_id']
+                            ui_debug_print(f"[DEBUG] Picker done, imdb_id_selected={imdb_id_selected} (type={type(imdb_id_selected)}) for {file.name}")
+                            if imdb_id_selected:
+                                from core.media_metadata_cache import get_entry as _get_entry
+                                meta = _get_entry(imdb_id_selected)
+                                ui_debug_print(f"[DEBUG] Metadata fetched for imdb_id_selected: {meta}")
+                                if meta:
+                                    matched['imdb_id'] = imdb_id_selected
+                                    matched['meta'] = meta
+                                    matched['found'] = True
+                        except Exception as e:
+                            ui_debug_print(f"[DEBUG] Failed to fetch metadata for use_cache: {e}")
+                    elif isinstance(action, str) and action.startswith('tt'):
+                        ui_debug_print(f"[DEBUG] Handling imdb id string action: {action}")
+                        try:
+                            from core.media_metadata_cache import get_entry as _get_entry
+                            meta = _get_entry(action)
+                            ui_debug_print(f"[DEBUG] Metadata fetched for imdb id string: {meta}")
+                            if meta:
+                                matched['imdb_id'] = action
+                                matched['meta'] = meta
+                                matched['found'] = True
+                        except Exception as e:
+                            ui_debug_print(f"[DEBUG] Failed to fetch metadata for imdb id {action}: {e}")
                     done_var.set(True)
 
                 # Show the frame in the main screen container and wait
@@ -139,6 +211,22 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
         if picker_break:
             break
     return matched
+
+    # Sanity: If we somehow have an imdb_id but meta is missing or not a dict, try to resolve it
+    try:
+        if matched.get('imdb_id') and not isinstance(matched.get('meta'), dict):
+            ui_debug_print(f"[SANITY] match_movie_metadata: imdb_id present but meta missing/invalid for file {file.name}: imdb_id={matched.get('imdb_id')}, meta={matched.get('meta')}")
+            try:
+                from core.media_metadata_cache import get_entry as _get_entry
+                fetched = _get_entry(matched.get('imdb_id'))
+                ui_debug_print(f"[SANITY] match_movie_metadata: fetched meta type={type(fetched)} value={fetched}")
+                if isinstance(fetched, dict):
+                    matched['meta'] = fetched
+                    matched['found'] = True
+            except Exception as e:
+                ui_debug_print(f"[SANITY] match_movie_metadata: failed to fetch meta for {matched.get('imdb_id')}: {e}")
+    except Exception:
+        pass
 
 
 # --- Build Extras for Filename ---
@@ -207,13 +295,33 @@ def process_file(file: Path, preview_only=False, rename_files=True, selected_fil
     if matched.get('rescrape_later'):
         ui_debug_print(f"[DBG] movies.process_file: about to call get_imdb_id_gui(rescrape) for {file.name}")
         try:
-            imdb_id = get_imdb_id_gui(file.name, search_title=orig_title, force_prompt=True)
+            # Try extracting IMDb id from filename/folders first before prompting
+            m = re.search(r"(tt\d{6,9})", file.stem)
+            if not m:
+                p = file.parent
+                depth = 0
+                while p and depth < 3:
+                    mm = re.search(r"(tt\d{6,9})", p.name)
+                    if mm:
+                        m = mm
+                        break
+                    p = p.parent
+                    depth += 1
+            if m:
+                imdb_id = m.group(1)
+                ui_debug_print(f"[DBG] movies.process_file: extracted imdb id {imdb_id} from path for rescrape {file.name}")
+            else:
+                imdb_id = get_imdb_id_gui(file.name, search_title=orig_title, force_prompt=True)
         except Exception as e:
             print(f"[ERROR] movies.process_file: get_imdb_id_gui(rescrape) raised: {e}")
             raise
         ui_debug_print(f"[DBG] movies.process_file: get_imdb_id_gui(rescrape) returned: {imdb_id}")
         if imdb_id:
             meta = get_entry(imdb_id)
+            ui_debug_print(f"[CHECK] After get_entry(imdb_id) for rescrape: type(meta)={type(meta)}, meta={meta}")
+            if not (meta is None or isinstance(meta, dict)):
+                ui_debug_print(f"[ERROR] movies.process_file: meta is not a dict or None after rescrape! type={type(meta)}, value={meta}")
+                meta = None
             found = meta is not None
         else:
             meta = None
@@ -227,14 +335,37 @@ def process_file(file: Path, preview_only=False, rename_files=True, selected_fil
     # If not found, prompt user for IMDb ID
     if not found:
         ui_debug_print(f"[DBG] movies.process_file: about to call get_imdb_id_gui for {file.name}")
+        # Try to extract an IMDb id from filename or parent folders before invoking GUI
+        imdb_id = None
         try:
-            imdb_id = get_imdb_id_gui(file.name, search_title=orig_title)
+            # look in filename stem
+            m = re.search(r"(tt\d{6,9})", file.stem)
+            if not m:
+                # search up to two parent folder names
+                p = file.parent
+                depth = 0
+                while p and depth < 3:
+                    mm = re.search(r"(tt\d{6,9})", p.name)
+                    if mm:
+                        m = mm
+                        break
+                    p = p.parent
+                    depth += 1
+            if m:
+                imdb_id = m.group(1)
+                ui_debug_print(f"[DBG] movies.process_file: extracted imdb id {imdb_id} from path for {file.name}")
+            else:
+                imdb_id = get_imdb_id_gui(file.name, search_title=orig_title)
         except Exception as e:
             print(f"[ERROR] movies.process_file: get_imdb_id_gui raised: {e}")
             raise
         ui_debug_print(f"[DBG] movies.process_file: get_imdb_id_gui returned: {imdb_id}")
         if imdb_id:
             meta = get_entry(imdb_id)
+            ui_debug_print(f"[CHECK] After get_entry(imdb_id) for not found: type(meta)={type(meta)}, meta={meta}")
+            if not (meta is None or isinstance(meta, dict)):
+                ui_debug_print(f"[ERROR] movies.process_file: meta is not a dict or None after not found! type={type(meta)}, value={meta}")
+                meta = None
     # If still no metadata, skip
     if not imdb_id or not meta:
         msg = f"❌ Skipping (no metadata): {file.name}"
@@ -356,10 +487,29 @@ def plan_movie_renames():
     skipped = []
     try:
         for file in MOVIES_DIR.rglob("*"):
-            process_file(file, planned=planned, skipped=skipped)
+            try:
+                process_file(file, planned=planned, skipped=skipped)
+            except Exception as e:
+                # Log file-level exception and continue - this helps identify offending file
+                try:
+                    from config import debug_print
+                    import traceback
+                    debug_print(f"[ERROR] plan_movie_renames: process_file raised for {file}: {e}")
+                    debug_print(traceback.format_exc())
+                except Exception:
+                    pass
+                continue
     except KeyboardInterrupt:
         print("🚫 Cancelled by user.")
-    for msg in skipped:
-        print(msg)
+        for msg in skipped:
+            print(msg)
+
+        # Debug: log planned entries types and contents to help trace bad entries
+        try:
+            from config import debug_print
+            for idx, entry in enumerate(planned):
+                debug_print(f"[DEBUG] plan_movie_renames: planned[{idx}] type={type(entry).__name__} keys={list(entry.keys()) if isinstance(entry, dict) else 'N/A'} repr={repr(entry)}")
+        except Exception:
+            pass
     return planned
 

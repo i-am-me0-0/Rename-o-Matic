@@ -5,3 +5,7 @@ planned_renames.json
 cache
 config.ini
 testconfig.ini
+tools/imdb_local_api/title.basics.tsv.gz
+tools/imdb_local_api/title.episode.tsv.gz
+tools/imdb_local_api/imdb.db
+tools/imdb_local_api/imdb.db-journal

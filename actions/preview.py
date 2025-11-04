@@ -45,7 +45,23 @@ def generate_preview(root=None):
         root = tk.Tk()
         root.withdraw()  # Hide the root window
         created_root = True
-    planned = movies.plan_movie_renames() + plan_series_renames_with_gui_prompts(root)
+    import traceback
+    planned = []
+    # Call planners separately so we can identify which one raises
+    try:
+        movie_planned = movies.plan_movie_renames()
+        planned.extend(movie_planned)
+    except Exception as e:
+        debug_print(f"[ERROR] generate_preview: movies.plan_movie_renames() raised: {e}")
+        debug_print(traceback.format_exc())
+        raise
+    try:
+        series_planned = plan_series_renames_with_gui_prompts(root)
+        planned.extend(series_planned)
+    except Exception as e:
+        debug_print(f"[ERROR] generate_preview: plan_series_renames_with_gui_prompts() raised: {e}")
+        debug_print(traceback.format_exc())
+        raise
     debug_print(f"[DEBUG] generate_preview: planned count={len(planned)}")
     if created_root:
         debug_print("[DEBUG] generate_preview: destroying temporary root")
@@ -58,8 +74,46 @@ def generate_preview(root=None):
     # Write as JSON array of objects
     json_entries = []
     MAX_PATH = 260  # Windows max path length
-    for item in planned:
-        sanitized_to = validate_and_sanitize_path(item["dest"])
+    for idx, item in enumerate(planned):
+        # Defensive: ensure item is a dict with expected keys
+        if not isinstance(item, dict):
+            debug_print(f"[ERROR] generate_preview: planned[{idx}] is not a dict (type={type(item).__name__}): {repr(item)} -- skipping")
+            continue
+        if not all(k in item for k in ("dest", "src", "type")):
+            debug_print(f"[ERROR] generate_preview: planned[{idx}] missing keys: {item} -- skipping")
+            continue
+        try:
+            sanitized_to = validate_and_sanitize_path(item["dest"])
+        except Exception as e:
+            debug_print(f"[ERROR] generate_preview: failed to sanitize dest for planned[{idx}] ({item}): {e} -- skipping")
+            continue
+        # Further normalize common punctuation artifacts introduced during naming
+        try:
+            # collapse repeated hyphens into a single spaced hyphen
+            sanitized_to = re.sub(r"\s*-\s*-\s*", " - ", sanitized_to)
+            # convert patterns like "-!" (hyphen immediately before exclamation) to just '!'
+            sanitized_to = re.sub(r"\s*-\s*!", "!", sanitized_to)
+            # collapse spaced duplicate punctuation like '! !' or '. .' to single punctuation
+            sanitized_to = re.sub(r'([!?.])(?:\s+\1)+', r"\1", sanitized_to)
+            # collapse multiple spaces again
+            sanitized_to = re.sub(r"\s{2,}", " ", sanitized_to)
+        except Exception:
+            pass
+        # Defensive: skip entries where source and destination are the same
+        try:
+            from pathlib import Path as _P
+            try:
+                if _P(item["src"]).resolve() == _P(sanitized_to).resolve():
+                    #debug_print(f"[DEBUG] generate_preview: Skipping entry with identical src/dest (resolved): {item['src']}")
+                    continue
+            except Exception:
+                # Fallback to string comparison if resolve() fails for any reason
+                if str(item.get("src", "")) == str(sanitized_to):
+                    #debug_print(f"[DEBUG] generate_preview: Skipping entry with identical src/dest (string): {item.get('src')}")
+                    continue
+        except Exception:
+            # Any unexpected error here should not block writing other entries
+            debug_print(f"[WARN] generate_preview: error while comparing src/dest for planned[{idx}] -- continuing: {item}")
         if len(sanitized_to) > MAX_PATH:
             print(f"❌ Skipping: Destination path too long ({len(sanitized_to)} chars): {sanitized_to}")
             continue

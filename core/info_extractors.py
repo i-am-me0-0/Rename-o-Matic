@@ -3,11 +3,17 @@ import re
 from config import EDGE_CASE_KEYWORDS, SERIES_ALIASES
 
 
-def clean_extras(extras: str) -> str:
-    """Clean leading/trailing separators and strip wrapping parentheses."""
+def clean_extras(extras: str, keep_dots: bool = True) -> str:
+    """Clean leading/trailing separators and strip wrapping parentheses.
+
+    By default this preserves dots (periods) so the original punctuation
+    can be used when composing destination filenames. Pass keep_dots=False
+    when you want a version suitable for loose matching (dots -> spaces).
+    """
     cleaned = extras.strip().lstrip(" -_.").strip()
-    # Replace dots with spaces (only on first clean)
-    cleaned = cleaned.replace('.', ' ')
+    # Optionally replace dots with spaces for matching purposes
+    if not keep_dots:
+        cleaned = cleaned.replace('.', ' ')
     # Remove surrounding parentheses if present
     if cleaned.startswith("(") and cleaned.endswith(")"):
         cleaned = cleaned[1:-1].strip()
@@ -43,7 +49,7 @@ def extract_movie_info(filename):
     if match:
         title = match.group(1).strip().replace('.', ' ').replace('_', ' ')
         year = match.group(2)
-        extras = clean_extras(match.group(3))
+        extras = clean_extras(match.group(3), keep_dots=False)
         # If year is actually a resolution, move it to extras
         for res in resolution_terms:
             if str(year) + "p" in filename:
@@ -126,7 +132,7 @@ def extract_episode_info(filename):
                     extras = groups[-1] if groups and groups[-1] else ''
             except Exception:
                 extras = groups[-1] if groups and groups[-1] else ''
-            extras = clean_extras(extras) if extras is not None else ''
+            extras = clean_extras(extras, keep_dots=False) if extras is not None else ''
             edge_found = any(keyword.lower() in fname for keyword in EDGE_CASE_KEYWORDS)
             episode = None
             # If episode_raw is a valid number, trust it as the episode number (do not treat as special just because of high number or resolution tags)
@@ -156,7 +162,7 @@ def extract_episode_info(filename):
             if match:
                 raw_show = match.group(1).strip().replace('.', ' ').replace('_', ' ')
                 show = apply_series_alias(raw_show)
-                extras = clean_extras(match.group(2))
+                extras = clean_extras(match.group(2), keep_dots=False)
                 # Always add the keyword to extras if not already present
                 if keyword.strip().title() not in extras:
                     extras = (keyword.strip().title() + (" " + extras if extras else "")).strip()

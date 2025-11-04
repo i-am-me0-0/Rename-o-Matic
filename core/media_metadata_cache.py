@@ -1,25 +1,116 @@
 import json
+import threading
+import queue
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 from config import MEDIA_METADATA_FILE 
 
 
+_metadata_cache: Optional[Dict[str, Any]] = None
+# Background writer queue and thread for non-blocking saves
+_write_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+_writer_thread_started = False
+_writer_lock = threading.Lock()
+
 def load_metadata() -> Dict[str, Any]:
+    """
+    Load metadata from disk into an in-memory cache on first access.
+    Subsequent calls return the cached dict to avoid repeated blocking JSON loads
+    on the GUI thread. This keeps behaviour backwards compatible while making
+    repeated lookups (get_entry/update_entry) fast.
+    """
+    global _metadata_cache
+    if _metadata_cache is not None:
+        return _metadata_cache
     if not MEDIA_METADATA_FILE.exists():
-        return {}
+        _metadata_cache = {}
+        return _metadata_cache
     try:
         with open(MEDIA_METADATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            _metadata_cache = json.load(f)
+            return _metadata_cache
     except Exception:
-        return {}
+        _metadata_cache = {}
+        return _metadata_cache
 
 def save_metadata(data: Dict[str, Any]):
+    """
+    Queue the metadata for background writing and update the in-memory cache.
+
+    The background writer thread will coalesce rapid successive snapshots and
+    write only the most recent data to disk, using an atomic tempfile+replace
+    strategy to avoid corrupt files.
+    """
+    global _metadata_cache, _writer_thread_started
+    # Ensure cache dir exists
     if not MEDIA_METADATA_FILE.parent.exists():
         MEDIA_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not MEDIA_METADATA_FILE.exists():
-        MEDIA_METADATA_FILE.write_text("{}", encoding="utf-8")
-    with open(MEDIA_METADATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    # Update in-memory cache immediately so readers see latest state
+    _metadata_cache = data
+
+    # Start writer thread once
+    with _writer_lock:
+        if not _writer_thread_started:
+            t = threading.Thread(target=_background_writer, daemon=True)
+            t.start()
+            _writer_thread_started = True
+
+    # Put the latest snapshot on the queue for writing
+    try:
+        _write_queue.put_nowait(data)
+    except Exception:
+        # If the queue is full or otherwise fails, fall back to synchronous write
+        try:
+            tmp_path = MEDIA_METADATA_FILE.with_suffix('.tmp')
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            try:
+                os.replace(tmp_path, MEDIA_METADATA_FILE)
+            except Exception:
+                tmp_path.rename(MEDIA_METADATA_FILE)
+        except Exception:
+            pass
+
+def _background_writer():
+    """Background thread that writes the most recent metadata snapshot to disk.
+
+    It coalesces queued snapshots so that if multiple updates arrive quickly,
+    only the last one is written, avoiding excessive disk churn.
+    """
+    while True:
+        try:
+            data = _write_queue.get()  # block until at least one item
+            # Drain the queue to get the most recent update
+            try:
+                while True:
+                    data = _write_queue.get_nowait()
+            except Exception:
+                pass
+
+            try:
+                tmp_path = MEDIA_METADATA_FILE.with_suffix('.tmp')
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                try:
+                    os.replace(tmp_path, MEDIA_METADATA_FILE)
+                except Exception:
+                    try:
+                        tmp_path.rename(MEDIA_METADATA_FILE)
+                    except Exception:
+                        pass
+            except Exception:
+                # ignore write errors; best-effort only
+                pass
+        except Exception:
+            # Keep the writer alive on unexpected errors
+            continue
+
+def clear_metadata_cache():
+    """Clear the in-memory metadata cache (useful for debugging)."""
+    global _metadata_cache
+    _metadata_cache = None
 
 def get_entry(imdb_id: str) -> Optional[Dict[str, Any]]:
     data = load_metadata()
