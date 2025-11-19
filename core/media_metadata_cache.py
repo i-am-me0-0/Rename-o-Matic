@@ -3,8 +3,8 @@ import threading
 import queue
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
-from config import MEDIA_METADATA_FILE 
+from typing import Optional, Dict, Any, cast
+from config import MEDIA_METADATA_FILE  
 
 
 _metadata_cache: Optional[Dict[str, Any]] = None
@@ -22,17 +22,17 @@ def load_metadata() -> Dict[str, Any]:
     """
     global _metadata_cache
     if _metadata_cache is not None:
-        return _metadata_cache
+        return cast(Dict[str, Any], _metadata_cache)
     if not MEDIA_METADATA_FILE.exists():
         _metadata_cache = {}
         return _metadata_cache
     try:
         with open(MEDIA_METADATA_FILE, 'r', encoding='utf-8') as f:
             _metadata_cache = json.load(f)
-            return _metadata_cache
+            return cast(Dict[str, Any], _metadata_cache)
     except Exception:
         _metadata_cache = {}
-        return _metadata_cache
+        return cast(Dict[str, Any], _metadata_cache)
 
 def save_metadata(data: Dict[str, Any]):
     """

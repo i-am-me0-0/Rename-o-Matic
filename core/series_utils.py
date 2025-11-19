@@ -103,6 +103,6 @@ def get_episode_title_from_cache(ep_id: str) -> str:
             debug_print(f"[get_episode_title_from_cache] OMDb scrape failed for ep_id: {ep_id}")
     else:
         debug_print(f"[get_episode_title_from_cache] ep_id not found in manual cache: {ep_id}")
-    # If still not found, return None
-    debug_print(f"[get_episode_title_from_cache] Returning None for ep_id: {ep_id}")
-    return None
+    # If still not found, return empty string (function promises a str return)
+    debug_print(f"[get_episode_title_from_cache] Returning empty string for ep_id: {ep_id}")
+    return ""

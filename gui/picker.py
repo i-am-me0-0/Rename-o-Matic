@@ -7,7 +7,7 @@ from config import ui_debug_print
 
 
 class Picker(tk.Frame):
-    def __init__(self, master: Any, original_line: str, search_title: str, results: List[Dict[str, Any]]):
+    def __init__(self, master: Any, original_line: str, search_title: str, results: List[Dict[str, Any]], source: Optional[str] = None):
         super().__init__(master)
         self.selection: Optional[dict[str, Any]] = None
         self.cancelled = False
@@ -17,6 +17,8 @@ class Picker(tk.Frame):
         self.search_term = tk.StringVar(root, value=search_title)
         self.results = results[:SEARCH_LIMIT]
         self.original_line = original_line
+        # source indicates caller type: e.g. 'movie' or 'series'
+        self.source = source
         # Variables used for parent communication (owned by root)
         self.done_var = tk.BooleanVar(root, value=False)
 
@@ -36,7 +38,7 @@ class Picker(tk.Frame):
             ui_debug_print(f"[DBG] Picker.__init__: could not read focus/grab: {e}")
 
     def make_widgets(self):
-        tk.Label(self, text=f"File/Folder: {self.original_line}", fg="gray", font=("Arial", 10, "italic"),
+        tk.Label(self, text=f"File/Folder: {self.original_line} | Type: {self.source or ''}", fg="gray", font=("Arial", 10, "italic"),
                  anchor="w", wraplength=500, justify="left").pack(fill='x', padx=5, pady=(5, 0))
 
         top_frame = tk.Frame(self)

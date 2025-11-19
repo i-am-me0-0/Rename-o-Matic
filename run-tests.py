@@ -3,6 +3,8 @@
 """
 Comprehensive logic test runner for the media renamer project.
 Tests all logic modules and prints results.
+
+DO NOT USE, hammers omdb with a lot of requests which is undesired
 """
 import sys
 import traceback
@@ -11,12 +13,62 @@ import traceback
 # List of test functions to run
 TESTS = []
 
+# --- Start local IMDb API for network redirection (fast, deterministic tests) ---
+import subprocess
+import socket
+import requests
+from pathlib import Path
+import time
+
+def _start_local_imdb_api():
+    """Start the local FastAPI IMDb server in a subprocess and wait until it's responsive."""
+    imdb_api_script = Path(__file__).parent / 'tools' / 'imdb_local_api' / 'imdb_local_api.py'
+    if not imdb_api_script.exists():
+        print(f"Local IMDb API script not found: {imdb_api_script}")
+        return None
+    # Launch in background using the same Python executable
+    proc = subprocess.Popen([sys.executable, str(imdb_api_script)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Wait for the server to accept connections on 127.0.0.1:8000
+    base = 'http://127.0.0.1:8000/'
+    for _ in range(40):
+        try:
+            resp = requests.get(base, timeout=1)
+            # server responded; ready
+            return proc
+        except Exception:
+            time.sleep(0.25)
+    # timed out
+    print("Timed out waiting for local IMDb API to start")
+    return proc
+
+
+# Start the local API and override OMDb base URL in config for the test run
+local_api_proc = None
+try:
+    local_api_proc = _start_local_imdb_api()
+    # If started successfully, override config's OMDb base URL so other modules use the local API
+    try:
+        import config as _cfg
+        _cfg.OMDB_BASE_URL = 'http://127.0.0.1:8000/'
+        print('[TEST RUN] Redirecting OMDb requests to local API at http://127.0.0.1:8000/')
+    except Exception:
+        pass
+except Exception:
+    local_api_proc = None
+
 # --- Import logic modules ---
 try:
     from actions import movies, preview, series, custom_imdb_web_poster_scraper, omdb_gui_scraper
     from core import file_lister, file_utils, info_extractors, manual_episode_cache, manual_episode_title_cache, media_metadata_cache, movies_utils, poster_scraper, series_utils
 except Exception as e:
     print(f"Failed to import modules: {e}")
+    # Ensure local API process is terminated if imports fail
+    try:
+        if local_api_proc:
+            local_api_proc.terminate()
+    except Exception:
+        pass
     sys.exit(1)
 
 # --- Movies Utils ---
@@ -132,7 +184,7 @@ def test_update_entry():
     updates = {"genre": "Action"}
     media_metadata_cache.update_entry(imdb_id, updates)
     result = media_metadata_cache.get_entry(imdb_id)
-    assert "genre" in result
+    assert isinstance(result, dict) and "genre" in result
 TESTS.append(("media_metadata_cache.update_entry", test_update_entry))
 
 # --- Manual Episode Cache ---
@@ -257,4 +309,13 @@ def run_all_tests():
             print(f"- {name}: {err}")
 
 if __name__ == "__main__":
-    run_all_tests()
+    try:
+        run_all_tests()
+    finally:
+        # Ensure local API subprocess is terminated after tests complete
+        try:
+            if local_api_proc:
+                local_api_proc.terminate()
+                local_api_proc.wait(timeout=2)
+        except Exception:
+            pass

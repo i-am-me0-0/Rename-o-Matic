@@ -57,15 +57,28 @@ def get_title_diff(orig_title, meta_title):
     """Return the words in orig_title that are not in meta_title, preserving order."""
     if not orig_title or not meta_title:
         return orig_title or ''
+    # Split into words
     orig_words = orig_title.split()
-    # Remove colons from meta_title words for matching
-    meta_words = [w.replace(':', '') for w in meta_title.split()]
-    # Use SequenceMatcher to find matching blocks
-    sm = difflib.SequenceMatcher(None, orig_words, meta_words)
+    meta_words = meta_title.split()
+
+    # Normalization helper: remove common punctuation and lowercase for fuzzy matching.
+    # This makes "Charlie's" and "Charlies" compare equal and avoids spurious diffs
+    # caused only by punctuation differences.
+    import re
+    def _normalize_word(w: str) -> str:
+        # remove punctuation characters (keep alphanumerics and underscore), lower-case
+        return re.sub(r"[^\w]", "", w).lower()
+
+    norm_orig = [_normalize_word(w) for w in orig_words]
+    norm_meta = [_normalize_word(w) for w in meta_words]
+
+    # Use SequenceMatcher on normalized words to find differing blocks
+    sm = difflib.SequenceMatcher(None, norm_orig, norm_meta)
     diff_words = []
     opcodes = sm.get_opcodes()
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == 'delete' or tag == 'replace':
+            # return the original (un-normalized) words from orig_title to preserve formatting
             diff_words.extend(orig_words[i1:i2])
     return ' '.join(diff_words)
 

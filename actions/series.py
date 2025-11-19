@@ -5,6 +5,8 @@ Main orchestration logic for series renamer. Utilities are imported from core/se
 from pathlib import Path
 import shutil
 import re
+import json
+import os
 from core.file_utils import is_video_file
 from core.series_utils import clean_brackets, get_folder_imdb_id, get_episode_imdb_id_from_filename
 from core.info_extractors import extract_episode_info
@@ -14,14 +16,40 @@ from actions.omdb_gui_scraper import get_series_imdb_id_gui, fetch_episode_ids_o
 from core.media_metadata_cache import (
     get_entry, get_episode_id_from_metadata, get_episode_info_by_id, load_metadata
 )
+import tkinter as tk
 from core.manual_episode_cache import load_manual_episode_cache, save_manual_episode_cache
 from core.manual_episode_title_cache import load_manual_episode_title_cache, save_manual_episode_title_cache
-from gui.episode_id_prompt import prompt_for_episode_id
+from gui.episode_id_prompt import prompt_for_episode_id, EpisodeIDPrompt, EpisodeIDPromptFrame
 from config import SKIP_IMDB_IDS
 from core.series_utils import is_imdb_id_skipped
 from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id, fetch_episode_ids_omdb
 # Use GUI-based IMDb conflict prompt from gui package
 from gui.imdb_conflict_prompt import prompt_for_imdb_id_conflict
+
+# Module-level imdb_cache helpers used by multiple functions
+imdb_cache_path = Path(__file__).parent.parent / 'cache' / 'imdb_cache.json'
+
+def load_imdb_cache():
+    try:
+        with open(imdb_cache_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_imdb_cache(cache):
+    try:
+        tmp_path = imdb_cache_path.with_suffix('.tmp')
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
+        try:
+            os.replace(tmp_path, imdb_cache_path)
+        except Exception:
+            try:
+                tmp_path.rename(imdb_cache_path)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 # --- Utility: Get all metadata entries (imdb_id, entry) ---
@@ -139,19 +167,13 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
         return show_id_map[(show, cache_key)]
 
     # Load imdb_cache
-    import json
-    imdb_cache_path = Path(__file__).parent.parent / 'cache' / 'imdb_cache.json'
-    try:
-        with open(imdb_cache_path, 'r', encoding='utf-8') as f:
-            imdb_cache = json.load(f)
-    except Exception:
-        imdb_cache = {}
+    imdb_cache = load_imdb_cache()
 
     from config import ui_debug_print
     ui_debug_print(f"[DBG] get_or_prompt_show_imdb_id: loaded imdb_cache keys={list(imdb_cache.keys())[:20]} (len={len(imdb_cache)}) for cache_key={cache_key!r}")
 
     # Normalize folder name for comparisons (replace en-dash etc)
-    folder_norm = folder_name.replace('\u2013', '-').replace('\u2014', '-').strip() if folder_name else folder_name
+    folder_norm = str(folder_name).replace('\u2013', '-').replace('\u2014', '-').strip() if folder_name else folder_name
 
     # First try the imdb_cache lookup using the folder-based key
     cached_imdb_id = imdb_cache.get(cache_key) or imdb_cache.get(folder_norm) or imdb_cache.get(show)
@@ -159,12 +181,12 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
 
     # If we have a cached imdb id but no metadata yet, fetch title/year now to populate media cache
     # This ensures fields like 'type' and 'totalSeasons' are present and avoids mis-classifying series
-    if cached_imdb_id and not cached_meta:
+    if cached_imdb_id and (not cached_meta or not cached_meta.get('year')):
         try:
             debug_print(f"[DEBUG] Populating missing media metadata for cached IMDb ID {cached_imdb_id}...")
             # Populate metadata and episodes in one call where possible; avoid extra poster scraping here
-            try:
-                from actions.omdb_gui_scraper import safe_request
+            try: 
+                from actions.omdb_gui_scraper import safe_request, fetch_title_and_year_from_imdb_id
                 # Use safe_request when available so network/I/O runs off main thread
                 safe_request(fetch_title_and_year_from_imdb_id, cached_imdb_id, True, False,
                              message=f"Fetching metadata and episodes for {cached_imdb_id}...")
@@ -224,39 +246,67 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             show_id_map[(show, cache_key)] = imdb_id
             return imdb_id
 
-        # If folder has a year(s) and cached meta has year(s), compare
+        # If folder has a year(s) and cached meta has year(s), compare using token rules
         if cached_type == 'series' and folder_start:
-            try:
-                fs = int(folder_start) if folder_start else None
-                fe = int(folder_end) if folder_end else fs
-                ms = int(meta_start) if meta_start else None
-                me = int(meta_end) if meta_end else ms
-            except Exception:
-                fs = folder_start; fe = folder_end; ms = meta_start; me = meta_end
+            # Normalize and compare year tokens. Rules:
+            # - Replace hyphen variants with spaces and extract 4-digit year tokens.
+            # - If either side is a single-year, accept if that year appears on the other side.
+            # - If both sides are multi-year, accept only when the token sets are identical.
+            def _tokens_from(start, end, raw_folder=None):
+                # Build a combined string from start/end/raw_folder, normalize dashes to spaces
+                pieces = []
+                try:
+                    if start is not None:
+                        pieces.append(str(start))
+                    if end is not None and str(end) != str(start):
+                        pieces.append(str(end))
+                except Exception:
+                    pass
+                if raw_folder:
+                    pieces.append(str(raw_folder))
+                s = " ".join(pieces)
+                # normalize dash variants to spaces and extract 4-digit year tokens
+                s = s.replace('\u2013', ' ').replace('\u2014', ' ').replace('-', ' ')
+                import re as _re
+                toks = _re.findall(r"\d{4}", s)
+                # Filter to plausible years (1900-2099) and dedupe while preserving order
+                out = []
+                for t in toks:
+                    try:
+                        v = int(t)
+                        if 1900 <= v <= 2099:
+                            if t not in out:
+                                out.append(t)
+                    except Exception:
+                        continue
+                return out
+
+            folder_tokens = _tokens_from(folder_start, folder_end, raw_folder=folder_norm)
+            meta_tokens = _tokens_from(meta_start, meta_end, raw_folder=None)
 
             years_match = False
-            if fs is None or ms is None:
-                years_match = False
-            else:
-                try:
-                    if isinstance(fs, int) and isinstance(ms, int):
-                        if fe >= ms and me >= fs:
-                            years_match = True
-                    else:
-                        if str(fs) == str(ms):
-                            years_match = True
-                except Exception:
+            try:
+                if not folder_tokens or not meta_tokens:
                     years_match = False
+                elif len(folder_tokens) == 1 or len(meta_tokens) == 1:
+                    # If either side is a single year, accept if that year appears on the other side
+                    years_match = bool(set(folder_tokens) & set(meta_tokens))
+                else:
+                    # Both are multi-year: require exact token set equality to match
+                    years_match = set(folder_tokens) == set(meta_tokens)
+            except Exception:
+                years_match = False
 
             # If the cached ID is already used for a different folder with different years, never use it
             if not years_match:
-                debug_print(f"⚠️ Not using cached IMDb ID {cached_imdb_id} for {cache_key}: years do not match.")
-                cached_imdb_id = None  # <--- ADD THIS LINE
-                cached_meta = None     # <--- ADD THIS LINE
+                debug_print(f"⚠️ Not using cached IMDb ID {cached_imdb_id} for {cache_key}: years do not match. folder_tokens={folder_tokens} meta_tokens={meta_tokens}")
+                ui_debug_print(f"[DBG] cache validation details: cache_key={cache_key!r} cached_imdb_id={cached_imdb_id} folder_tokens={folder_tokens} meta_tokens={meta_tokens}")
+                cached_imdb_id = None
+                cached_meta = None
                 # Force prompt for new ID below
             else:
                 imdb_id = cached_imdb_id
-                debug_print(f"[DEBUG] Matched series metadata for {show} -> {imdb_id}")
+                debug_print(f"[DEBUG] Matched series metadata for {show} -> {imdb_id} (folder_tokens={folder_tokens} meta_tokens={meta_tokens})")
                 show_id_map[(show, cache_key)] = imdb_id
                 return imdb_id
 
@@ -266,7 +316,8 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
     folder_imdb_id = get_folder_imdb_id(folder_name)
     if folder_imdb_id:
         meta = get_entry(folder_imdb_id)
-        if meta and meta.get('title') and meta.get('title').strip().lower() == str(show).strip().lower():
+        title_val = meta.get('title') if meta else None
+        if title_val and title_val.strip().lower() == str(show).strip().lower():
             debug_print(f"[IMDB] Using IMDb ID from folder name: {folder_imdb_id} (title matches '{show}')")
             imdb_cache[cache_key] = folder_imdb_id
             try:
@@ -288,7 +339,7 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             debug_print(f"⏭️ Skipped by user: {cache_key}")
             return None
 
-        meta = get_entry(imdb_id)
+        meta = get_entry(imdb_id) if imdb_id else None
         # If this is a newly-picked series (no metadata or no episodes), try to populate metadata and episodes now.
         if not meta or not meta.get('episodes'):
             try:
@@ -305,7 +356,7 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
                 # best-effort only; if this fails we'll fall back to the missing-episodes prompt later
                 pass
             # refresh meta after attempted population
-            meta = get_entry(imdb_id)
+            meta = get_entry(imdb_id) if imdb_id else None
         ui_debug_print(f"[DBG] get_or_prompt_show_imdb_id: post-population meta={'present' if meta else 'MISSING'} for imdb_id={imdb_id}")
         folder_start, folder_end = extract_years_from_folder(cache_key)
 
@@ -321,6 +372,7 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
         if meta and meta.get('type') == 'series' and imdb_id_used_for_other_series(imdb_id, cache_key, folder_start, folder_end):
             reason = f"The IMDb ID you selected is already used for another folder with different years. Please enter a valid IMDb ID for this folder or skip."
             manual_id = prompt_for_imdb_id_conflict(folder_name, imdb_id, reason)
+            ui_debug_print(f"[DBG] imdb_conflict_prompt returned: {manual_id} (type={type(manual_id)}) for {cache_key}")
             if manual_id is None:
                 debug_print(f"⏭️ Skipped by user: {cache_key}")
                 return None
@@ -330,7 +382,7 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             else:
                 imdb_id = manual_id
                 force_override = False
-            meta = get_entry(imdb_id)
+            meta = get_entry(imdb_id) if imdb_id else None
             # Re-check for conflict unless the user explicitly chose to override for this folder
             if imdb_id_used_for_other_series(imdb_id, cache_key, folder_start, folder_end) and not force_override:
                 continue
@@ -388,7 +440,7 @@ def lookup_episode_id(imdb_id, season, episode, file_stem=None):
     if ep_id:
         return ep_id
     if season is None and episode is not None:
-        meta = get_entry(imdb_id)
+        meta = get_entry(imdb_id) if imdb_id else None
         if meta and 'episodes' in meta:
             for s, eps in meta['episodes'].items():
                 for ep_num, ep_id in eps.items():
@@ -430,7 +482,7 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
     series_title = show
     years_str = ""
     if imdb_id:
-        meta = get_entry(imdb_id)
+        meta = get_entry(imdb_id) if imdb_id else None
         if meta:
             if meta.get('title'):
                 series_title = meta['title']
@@ -860,19 +912,46 @@ def plan_series_renames():
                 pass
 
         # If folder has year(s), and metadata has year(s), and they do not match, force a unique group key and prompt for new ID
-        years_mismatch = False
-        if folder_start and meta_start:
+        # Use the same token-normalization/matching rules as get_or_prompt_show_imdb_id
+        def _tok(start, end, raw=None):
+            pieces = []
             try:
-                fs = int(folder_start)
-                fe = int(folder_end) if folder_end else fs
-                ms = int(meta_start)
-                me = int(meta_end) if meta_end else ms
-                # mismatch if no overlap
-                if fe < ms or me < fs:
-                    years_mismatch = True
+                if start is not None:
+                    pieces.append(str(start))
+                if end is not None and str(end) != str(start):
+                    pieces.append(str(end))
             except Exception:
-                if str(folder_start) != str(meta_start):
-                    years_mismatch = True
+                pass
+            if raw:
+                pieces.append(str(raw))
+            s = " ".join(pieces)
+            s = s.replace('\u2013', ' ').replace('\u2014', ' ').replace('-', ' ')
+            import re as _re
+            toks = _re.findall(r"\d{4}", s)
+            # Filter to plausible years and dedupe
+            seen = set(); res = []
+            for t in toks:
+                try:
+                    v = int(t)
+                    if 1900 <= v <= 2099 and t not in seen:
+                        res.append(t); seen.add(t)
+                except Exception:
+                    continue
+            return res
+
+        folder_tokens = _tok(folder_start, folder_end, raw=folder_name_norm)
+        meta_tokens = _tok(meta_start, meta_end, raw=meta_start)
+        years_mismatch = False
+        try:
+            if not folder_tokens or not meta_tokens:
+                years_mismatch = False
+            elif len(folder_tokens) == 1 or len(meta_tokens) == 1:
+                years_mismatch = not bool(set(folder_tokens) & set(meta_tokens))
+            else:
+                # both multi-year: require exact token equality
+                years_mismatch = set(folder_tokens) != set(meta_tokens)
+        except Exception:
+            years_mismatch = False
 
         if meta and meta.get('title') and not years_mismatch:
             series_title = meta['title']
@@ -1128,31 +1207,31 @@ def plan_series_renames_with_gui_prompts(root=None):
         folder_name = get_series_folder_name(file)
         show_files.setdefault((show, folder_name), []).append((file, season, episode, extras))
 
-    # For each show, always use folder name to look up series IMDb ID, then prompt for missing episodes
+    # For each show, resolve a validated IMDb ID (this will consult imdb_cache but
+    # also validate years and prompt the user if necessary). We intentionally call
+    # get_or_prompt_show_imdb_id so mismatched-year cached entries do not get used
+    # silently (this was the source of the missing conflict prompt).
     for (show, folder_name), files in show_files.items():
-        # Prefer folder_name for imdb_cache lookup, fallback to show
-        imdb_id = imdb_cache.get(folder_name) or imdb_cache.get(show)
-        # If imdb_id came from the imdb_cache, log that selection so series matches are always visible
+        imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
+        if not imdb_id:
+            debug_print(f"⏭️ Skipped fetching OMDb data for show: {show} (no IMDb ID)")
+            continue
+        # If this imdb_id appears to come from the imdb_cache, log which key matched
         try:
             cached_key = None
-            if folder_name in imdb_cache:
-                cached_key = folder_name
-            elif show in imdb_cache:
-                cached_key = show
+            for k, v in imdb_cache.items():
+                if v == imdb_id:
+                    cached_key = k
+                    break
             if cached_key:
                 debug_print(f"[DEBUG] Matched series metadata for {show} -> {imdb_id} (from imdb_cache key: {cached_key})")
         except Exception:
             pass
-        if not imdb_id:
-            imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
-            if not imdb_id:
-                debug_print(f"⏭️ Skipped fetching OMDb data for show: {show} (no IMDb ID)")
-                continue
 
         # Build an episode_cache from media metadata (if present) so we only request missing seasons from OMDb
         from core.media_metadata_cache import get_entry
         episode_cache = {}
-        meta = get_entry(imdb_id)
+        meta = get_entry(imdb_id) if imdb_id else None
         if meta and 'episodes' in meta:
             try:
                 for season_str, eps in meta['episodes'].items():
@@ -1232,14 +1311,16 @@ def plan_series_renames_with_gui_prompts(root=None):
                     # Fallback to Toplevel prompt
                     prompt = EpisodeIDPrompt(root, f"{show} | Folder: {folder_name}", prompt_list, on_submit, file_names=[file.name for (file,_,_,_) in missing_episodes])
                     try:
-                        root.wait_window(prompt)
+                        if root is not None:
+                            root.wait_window(prompt)
                     except Exception:
                         pass
             else:
                 # CLI/standalone mode: keep using the Toplevel-based prompt
                 prompt = EpisodeIDPrompt(root, f"{show} | Folder: {folder_name}", prompt_list, on_submit, file_names=[file.name for (file,_,_,_) in missing_episodes])
                 try:
-                    root.wait_window(prompt)
+                    if root is not None:
+                        root.wait_window(prompt)
                 except Exception:
                     pass
 

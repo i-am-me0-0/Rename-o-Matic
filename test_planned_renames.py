@@ -2,7 +2,7 @@ import json
 import sys
 import difflib
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 import re
 
 from config import PLANNED_RENAMES_FILE, MOVIES_DIR, SERIES_DIR, debug_print
@@ -13,13 +13,14 @@ STATIC_MOVIES = [
     "The Matrix (1999) [1080p BluRay x264] [tt0133093].mkv",
     "Ace Ventura - Pet Detective (1994) [REMASTERED 720p BluRay x265 10Bit] [tt0109040].mkv",
     "Back to the Future (1985) [wrong id] [tt0088762] [tt0088763].mkv",
+    "Limitless (2011) [2000 - 0 tt1219289].mkv",
     "Elysium (2013) [720p BluRay x265 6CH] [tt1535108].mkv",
     "I, Robot (2004) [finished] [tt0343818].mkv",
     "Kung Fu Panda 3 (2016) [720p WEB-DL x265 ESub] [tt2267968].mkv",
     "Mission - Impossible - The Final Reckoning (2025) [720p - WEB-DL x265 10Bit] [tt9603208].mkv",
     "RoboCop (1987) [1980] [tt0093870].mkv",
     "RoboCop (2014) [tt1234721].mkv",
-    "WALL·E (2008) [WALL-E - 720p BluRay x264] [tt0910970].mkv",
+    "WALL·E (2008) [720p BluRay x264] [tt0910970].mkv",
     "avatar/Avatar (2009) [Collector's Extended Edition - BluRay] [x265] [EN NL Subs] [tt0499549].mkv",
 ]
 
@@ -33,6 +34,7 @@ STATIC_SERIES = [
     "Meta Runner (2018–2022) [tt10695770]/Season 01/Meta Runner - S01E02 [Out of Bounds - Game Over 720p WEB-DL x265] [tt10756490].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 02/Meta Runner - S02E01 [Hard Reset - Restart - 1080p BluRay x264] [tt13292040].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 02/Meta Runner - S02E02 [Firewall - 1080p BluRay x264] [tt13327702].mkv",
+    "Limitless (2015–2016) [tt4422836]/Season 01/Limitless - S01E01 [tt4927052].mkv",
     "Scorpion (2014–2018) [tt3514324]/Season 01/Scorpion - S01E07 [Father's Day 720p BluRay x264] [tt4089098].mkv",
     "Scorpion (2014–2018) [tt3514324]/Season 02/Scorpion - S02E18 [The Fast & the Nerdiest 720p WEB-DL x265] [tt5376432].mkv",
     "Scorpion (2014–2018) [tt3514324]/Season 03/Scorpion - S03E01 [E02 Civil War and More Civil War 720p WEB-DL x265] [tt5582700]].mkv",
@@ -67,7 +69,7 @@ def color_text(s: str, code: str) -> str:
         return s
 
 
-def highlight_mismatch(a: str, b: str) -> (str, str):
+def highlight_mismatch(a: str, b: str) -> Tuple[str, str]:
     """Return (a_highlighted, b_highlighted) where the differing suffix is red.
 
     Uses simple common-prefix logic (case-sensitive) to find the divergence point.
@@ -146,7 +148,7 @@ def best_candidate_raw(rel: str, candidates: list) -> str:
     return best or ''
 
 
-def word_diff_highlight(expected: str, actual: str) -> (str, str):
+def word_diff_highlight(expected: str, actual: str) -> Tuple[str, str]:
     """Return (expected_h, actual_h) where only differing words are colored red.
 
     Uses difflib.ndiff on word tokens; equal words are left as-is, words present only
@@ -263,7 +265,7 @@ def check_planned_against_names(names: List[str]) -> Dict[str, Any]:
     return summary
 
 
-def run_test(names: List[str] = None) -> int:
+def run_test(names: Optional[List[str]] = None) -> int:
     """CLI helper: call from command line or import and call.
 
     If names is None, read names from sys.argv after the module name, split by commas.
@@ -360,7 +362,7 @@ def run_test(names: List[str] = None) -> int:
     # Assignment: use maximum bipartite matching (Kuhn) so each provided name can be used at most once
     def max_bipartite_assign(candidates_per_planned: Dict[int, List[str]],
                              provided_list: List[str],
-                             strip_key: str) -> (Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]):
+                             strip_key: str) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
         # Map provided names to indices
         prov_index = {p: i for i, p in enumerate(provided_list)}
         n_prov = len(provided_list)

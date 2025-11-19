@@ -1,5 +1,5 @@
 import tkinter as tk
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List, Tuple, Optional
 import threading
 from io import BytesIO
 try:
@@ -18,7 +18,7 @@ class ExistingCachePickerFrame(tk.Frame):
     The frame will search the local media metadata cache for titles matching
     the provided folder/show name and present a list with small poster thumbnails.
     """
-    def __init__(self, master: Any, name: str, conflicting_id: str, on_choice: Callable[[str], None], filter_type: str = None):
+    def __init__(self, master: Any, name: str, conflicting_id: str, on_choice: Callable[[Optional[str]], None], filter_type: Optional[str] = None):
         super().__init__(master)
         self.on_choice = on_choice
         self._poster_img = None
@@ -147,13 +147,17 @@ class ExistingCachePickerFrame(tk.Frame):
         _, mid, meta = self.matches[idx]
         poster_url = meta.get('poster_url') if meta else None
         if poster_url and requests and Image:
+            # Capture modules into locals so the worker thread sees concrete module objects
+            requests_mod = requests
+            Image_mod = Image
+            ImageTk_mod = ImageTk
             def _dl():
                 try:
-                    resp = requests.get(poster_url, timeout=6)
-                    img = Image.open(BytesIO(resp.content)).resize((140,200))
+                    resp = requests_mod.get(poster_url, timeout=6)
+                    img = Image_mod.open(BytesIO(resp.content)).resize((140,200))
                     def _set_img():
                         try:
-                            self._poster_img = ImageTk.PhotoImage(img)
+                            self._poster_img = ImageTk_mod.PhotoImage(img)
                             self.img_label.configure(image=self._poster_img, text='')
                         except Exception:
                             pass

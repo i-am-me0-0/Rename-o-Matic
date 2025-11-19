@@ -22,15 +22,19 @@ def prompt_for_episode_id(show_name: str, prompt_msg: str) -> Optional[str]:
         if get_root:
             app_root = get_root()
             done_var = tk.BooleanVar(app_root)
-            result = {'id': None}
+            # use a distinct dict name so the fallback flow (which uses `result = None`)
+            # doesn't make the typechecker assume this variable can be None or a str.
+            # initialize with string-typed default so __setitem__ accepts str
+            result_container = {'id': ''}
 
             def _on_submit(val: Optional[str]):
-                result['id'] = val
+                # coerce None to empty string so the stored value is always str
+                result_container['id'] = val or ''
                 done_var.set(True)
 
             app_root.show_screen(EpisodeIDPromptFrame, show_name, prompt_msg, _on_submit)
             app_root.wait_variable(done_var)
-            return result['id']
+            return result_container['id']
     except Exception:
         pass
 

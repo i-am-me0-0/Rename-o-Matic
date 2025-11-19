@@ -96,12 +96,7 @@ def ensure_metadata_for_cache(debug_print, get_meta_entry):
                     scrape_full_movie_metadata(imdbid)
                 except Exception:
                     pass
-            except Exception:
-                # Fallback to the HTML scraper if OMDb fails
-                try:
-                    scrape_full_movie_metadata(imdbid)
-                except Exception:
-                    pass
+            
 
 
 # --- Movie Metadata Matching and User Prompting ---
@@ -133,7 +128,8 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
             elif entry.get('year') and orig_year and entry.get('year') != orig_year:
                 # Replace the old Toplevel prompt with a frame-based prompt
                 from gui.year_mismatch_prompt import YearMismatchPrompt
-                user_choice = {'action': None}
+                # use string-typed default to avoid static-type issues when assigning
+                user_choice = {'action': ''}
                 app_root = get_root()
                 done_var = tk.BooleanVar()
 
@@ -278,6 +274,53 @@ def process_file(file: Path, preview_only=False, rename_files=True, selected_fil
     if imdb_id_in_name and imdb_id_in_name in SKIP_IMDB_IDS:
         if should_skip_due_to_imdb_id(file, imdb_id_in_name, skipped):
             return
+
+    # If the filename contains an IMDb id but it's not yet present in the media
+    # metadata cache, attempt to fetch metadata now (prefer OMDb, fallback to
+    # the HTML scraper). This ensures files that already contain an imdb id can
+    # be processed immediately instead of being skipped due to missing cache.
+    if imdb_id_in_name:
+        try:
+            meta_now = get_entry(imdb_id_in_name)
+        except Exception:
+            meta_now = None
+        if not meta_now:
+            try:
+                # Local import to avoid cycles and keep UI-free call-paths safe
+                from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id, scrape_full_movie_metadata
+                try:
+                    # Try OMDb first; populate episodes if it's a series
+                    fetch_title_and_year_from_imdb_id(imdb_id_in_name, populate_episodes=True, fetch_poster=False)
+                except Exception:
+                    # Fallback to HTML scraper if OMDb fails
+                    try:
+                        scrape_full_movie_metadata(imdb_id_in_name)
+                    except Exception:
+                        pass
+                # Re-read from cache after attempted fetch
+                try:
+                    meta_now = get_entry(imdb_id_in_name)
+                except Exception:
+                    meta_now = None
+            except Exception:
+                meta_now = None
+        # If we fetched metadata, ensure poster_url is populated too (use custom scraper)
+        if meta_now and isinstance(meta_now, dict):
+            try:
+                # Only fetch poster if not present
+                if not meta_now.get('poster_url'):
+                    from actions.custom_imdb_web_poster_scraper import fetch_poster_url_and_store
+                    try:
+                        fetch_poster_url_and_store(imdb_id_in_name)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        # If we now have metadata, use it to set imdb_id/meta/found as appropriate
+        if meta_now and isinstance(meta_now, dict):
+            imdb_id = imdb_id_in_name
+            meta = meta_now
+            found = True
 
     # Load all metadata
     metadata = load_metadata()

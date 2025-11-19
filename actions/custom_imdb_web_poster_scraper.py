@@ -5,7 +5,7 @@ import time
 import random
 import requests
 from bs4 import BeautifulSoup
-from typing import List, Optional
+from typing import List, Optional 
 import os
 import re
 from pathlib import Path
@@ -33,11 +33,20 @@ def fetch_poster_url(imdb_id: str) -> Optional[str]:
 
         meta = soup.find("meta", property="og:image")
         if meta and meta.get("content"):
-            return meta["content"]
+            # bs4 may return an AttributeValue or AttributeValueList; coerce to str to satisfy static typing
+            try:
+                val = meta.get("content")
+                return str(val) if val is not None else None
+            except Exception:
+                return None
 
         img = soup.select_one(".ipc-media img")
         if img and img.get("src"):
-            return img["src"]
+            try:
+                src = img.get("src")
+                return str(src) if src is not None else None
+            except Exception:
+                return None
 
     except Exception as e:
         print(f"[{imdb_id}] Error: {e}")
@@ -246,7 +255,8 @@ def scrape_full_movie_metadata(imdb_id: str) -> dict:
         soup = BeautifulSoup(response.text, "html.parser")
         # Title
         title_tag = soup.find("meta", property="og:title")
-        title = title_tag["content"] if title_tag and title_tag.get("content") else ""
+        # coerce meta attribute to string when present to avoid bs4 AttributeValueList typing
+        title = str(title_tag.get("content")) if title_tag and title_tag.get("content") else ""
         # Clean title: remove ' - IMDb' and anything after ' ('
         if title:
             title = title.replace(" - IMDb", "").strip()
@@ -255,11 +265,20 @@ def scrape_full_movie_metadata(imdb_id: str) -> dict:
         # Year
         year = ""
         year_tag = soup.find("span", id="titleYear")
-        if year_tag and year_tag.find("a"):
-            year = year_tag.find("a").text.strip()
+        if year_tag is not None:
+            a_tag = year_tag.find("a")
+            if a_tag is not None and getattr(a_tag, 'text', None):
+                try:
+                    year = a_tag.text.strip()
+                except Exception:
+                    year = ""
         else:
             # Try to extract from title or elsewhere
-            year_match = soup.title and re.search(r"(19|20)\d{2}", soup.title.text)
+            year_match = None
+            title_tag_obj = getattr(soup, 'title', None)
+            title_text = getattr(title_tag_obj, 'text', None) if title_tag_obj is not None else None
+            if title_text:
+                year_match = re.search(r"(19|20)\d{2}", title_text)
             if year_match:
                 year = year_match.group(0)
         # Summary/Plot

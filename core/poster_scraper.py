@@ -2,8 +2,9 @@
 def update_posters_from_filenames(status_callback=None):
     from actions.custom_imdb_web_poster_scraper import fetch_poster_url
     from config import MOVIES_DIR, SERIES_DIR
+    from typing import Any, cast
     import re
-    import requests
+    import requests 
     from bs4 import BeautifulSoup
     cache = {}
     video_exts = {'.mkv', '.mp4', '.avi', '.mov'}
@@ -41,9 +42,9 @@ def update_posters_from_filenames(status_callback=None):
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, "html.parser")
-                meta = soup.find("meta", property="og:title")
+                meta = cast(Any, soup.find("meta", property="og:title"))
                 if meta and meta.get("content"):
-                    title = meta["content"].replace(" - IMDb", "").strip()
+                    title = meta.get("content").replace(" - IMDb", "").strip()
             print(f"[POSTER SCRAPER] Title: {title}")
         except Exception as e:
             print(f"[POSTER SCRAPER] Error fetching title for {imdb_id}: {e}")

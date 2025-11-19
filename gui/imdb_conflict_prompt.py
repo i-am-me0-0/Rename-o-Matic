@@ -64,10 +64,12 @@ def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None
         btn_frame.pack(pady=4)
         use_btn = tk.Button(btn_frame, text="Use IMDb ID", command=on_use)
         use_btn.pack(side=tk.LEFT, padx=8)
-        skip_btn = tk.Button(btn_frame, text="Skip Folder", command=on_skip)
-        skip_btn.pack(side=tk.LEFT, padx=8)
+        use_cache_btn = tk.Button(btn_frame, text="Use Existing Cache", command=lambda: on_use_cache())
+        use_cache_btn.pack(side=tk.LEFT, padx=8)
         overide_btn = tk.Button(btn_frame, text="Use Same IMDb ID", command=on_overide)
         overide_btn.pack(side=tk.LEFT, padx=8)
+        skip_btn = tk.Button(btn_frame, text="Skip Folder", command=on_skip)
+        skip_btn.pack(side=tk.LEFT, padx=8)
 
         # Image frame on the right (placeholder until poster loads)
         img_frame = tk.Frame(content, width=140, height=180)
@@ -88,6 +90,39 @@ def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None
             debug_print(f"[WARN] imdb_conflict_prompt: failed to read media cache for {conflicting_id}: {e}")
             poster_url = None
 
+        # Callback to open an ExistingCachePicker and let the user pick an existing media cache entry
+        def on_use_cache():
+            try:
+                ui_debug_print(f"[DBG] imdb_conflict_prompt: opening ExistingCachePicker for folder {folder_name}")
+                from gui.existing_cache_picker import ExistingCachePickerFrame
+                picker_done = tk.BooleanVar(root)
+                selected = {'imdb_id': None}
+
+                def picker_callback(imdb_id):
+                    ui_debug_print(f"[DBG] imdb_conflict_prompt: cache picker returned imdb_id={imdb_id}")
+                    selected['imdb_id'] = imdb_id
+                    picker_done.set(True)
+
+                top_cache = tk.Toplevel(root)
+                top_cache.title("Pick Existing Cache Entry")
+                top_cache.geometry("500x400+200+200")
+                frame = ExistingCachePickerFrame(top_cache, folder_name, conflicting_id or '', picker_callback)
+                frame.pack(fill='both', expand=True)
+                top_cache.transient(root)
+                top_cache.grab_set()
+                root.wait_variable(picker_done)
+                try:
+                    top_cache.destroy()
+                except Exception:
+                    pass
+                if selected['imdb_id']:
+                    # Treat this as if the user entered that IMDb ID
+                    result['imdb_id'] = selected['imdb_id']
+                    picker_done.set(True)
+                    root.quit()
+            except Exception as e:
+                debug_print(f"[WARN] imdb_conflict_prompt: failed to open cache picker: {e}")
+
         if poster_url:
             ui_debug_print(f"[DBG] imdb_conflict_prompt: starting poster download for {conflicting_id}: {poster_url}")
             def _set_img_from_bytes(img_bytes):
@@ -96,7 +131,7 @@ def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None
                     img_tk = ImageTk.PhotoImage(img, master=root)
                     try:
                         img_label.configure(image=img_tk, text="")
-                        img_label.image = img_tk
+                        setattr(img_label, "image", img_tk)
                         ui_debug_print(f"[DBG] imdb_conflict_prompt: poster set for {conflicting_id}")
                     except Exception as e:
                         debug_print(f"[WARN] imdb_conflict_prompt: failed to configure poster label for {conflicting_id}: {e}")

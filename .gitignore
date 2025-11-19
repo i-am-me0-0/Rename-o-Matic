@@ -9,3 +9,4 @@ tools/imdb_local_api/title.basics.tsv.gz
 tools/imdb_local_api/title.episode.tsv.gz
 tools/imdb_local_api/imdb.db
 tools/imdb_local_api/imdb.db-journal
+.vscode/settings.json

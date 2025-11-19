@@ -6,9 +6,9 @@ import sqlite3
 import subprocess
 import importlib
 import requests
+from typing import Any, cast, Optional
 from fastapi import FastAPI, Query
-import uvicorn
-from typing import Optional
+import uvicorn  
 from bs4 import BeautifulSoup
 
 # ---- Auto-install dependencies ----
@@ -254,8 +254,8 @@ def fetch_imdb_poster(imdbID):
         r = requests.get(url, headers=headers, timeout=5)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        meta = soup.find("meta", property="og:image")
-        if meta:
+        meta = cast(Any, soup.find("meta", property="og:image"))
+        if meta and meta.get("content"):
             return meta.get("content")
     except Exception as e:
         print(f"[IMDb poster fetch failed] {imdbID}: {e}")

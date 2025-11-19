@@ -19,6 +19,15 @@ def validate_and_sanitize_path(path_str):
     if match:
         drive = match.group(1)
         rest = match.group(2)
+        # Replace backslashes that appear inside bracketed 'extras' (e.g. "[A \\ B]")
+        # with a safe separator so they don't get interpreted as path separators.
+        try:
+            def _fix_brackets(m):
+                inner = m.group(1)
+                return "[" + inner.replace('\\\\', ' - ').replace('\\', ' - ') + "]"
+            rest = re.sub(r"\[([^\]]*)\]", _fix_brackets, rest)
+        except Exception:
+            pass
         # Sanitize the rest
         parts = Path(rest).parts
         sanitized_parts = [sanitize_path_component(p) for p in parts]
@@ -126,6 +135,13 @@ def generate_preview(root=None):
     with open(PLANNED_RENAMES_FILE, "w", encoding="utf-8") as f:
         json.dump(json_entries, f, indent=2, ensure_ascii=False)
     print(f"📄 Preview written to {PLANNED_RENAMES_FILE}. Review and edit as needed.")
+    # Safely import the global OMDb request counter (if present) and print it.
+    try:
+        from actions.omdb_gui_scraper import omdb_request_count
+        print(f"🔎 OMDb was accessed {omdb_request_count} times.")
+    except Exception:
+        # Best-effort: if the counter isn't available or import fails, silently continue
+        pass
 
 def execute_from_preview():
     if not PLANNED_RENAMES_FILE.exists():

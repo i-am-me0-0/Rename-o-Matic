@@ -206,7 +206,7 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
         search_results = safe_request(search_omdb, search_title, message=f"Searching for '{search_title}'...")
         ui_debug_print(f"[DBG] get_imdb_id_gui: search returned {len(search_results)} results")
         ui_debug_print("[DBG] get_imdb_id_gui: showing Picker frame via show_screen")
-        picker = get_root().show_screen(Picker, raw_line, search_title, search_results)
+        picker = get_root().show_screen(Picker, raw_line, search_title, search_results, 'movie')
         ui_debug_print(f"[DBG] get_imdb_id_gui: picker created: {picker}; waiting for picker.done_var")
         try:
             get_root().wait_variable(picker.done_var)
@@ -219,13 +219,13 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
         result = None
         # Log picker flags for diagnostics
         ui_debug_print(f"[DBG] picker state: skipped={getattr(picker, 'skipped', False)}, cancelled={getattr(picker, 'cancelled', False)}, selection={getattr(picker, 'selection', None)}")
-        if getattr(picker, "skipped", False):
+        if getattr(picker, 'skipped', False):
             debug_print(f"[INFO] User skipped file: {raw_line}")
             result = None
-        elif picker.cancelled:
+        elif getattr(picker, 'cancelled', False):
             debug_print(f"[INFO] User cancelled picker for: {raw_line}")
             raise KeyboardInterrupt("User cancelled IMDb matching.")
-        elif picker.selection:
+        elif getattr(picker, 'selection', None):
             imdb_id = picker.selection['imdbID']
             debug_print(f"[INFO] User selected imdbID={imdb_id} for '{raw_line}'")
             # Persist mapping in imdb_cache (small file) so subsequent runs are faster
@@ -319,7 +319,7 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
         search_results = safe_request(search_omdb, search_title, message=f"Searching for series '{search_title}'...")
         ui_debug_print(f"[DBG] get_series_imdb_id_gui: search returned {len(search_results)} results")
         ui_debug_print("[DBG] get_series_imdb_id_gui: showing Picker frame via show_screen")
-        picker = get_root().show_screen(Picker, raw_line, search_title, search_results)
+        picker = get_root().show_screen(Picker, raw_line, search_title, search_results, 'series')
         ui_debug_print(f"[DBG] get_series_imdb_id_gui: picker created: {picker}; waiting for picker.done_var")
         try:
             get_root().wait_variable(picker.done_var)
@@ -330,15 +330,25 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
         # Read data before destroying picker
         result = None
         ui_debug_print(f"[DBG] picker state (series): skipped={getattr(picker, 'skipped', False)}, cancelled={getattr(picker, 'cancelled', False)}, selection={getattr(picker, 'selection', None)}")
-        if picker.cancelled:
+        # Use getattr to defensively read boolean flags added to the Picker instance.
+        # Earlier versions checked bound methods like `picker.skip` which are truthy
+        # and caused the code to always take the skip branch. Use the actual
+        # attributes (skipped/cancelled/selection) when present.
+        if getattr(picker, 'cancelled', False):
             debug_print(f"[INFO] User cancelled series picker for: {raw_line}")
             try:
                 picker.destroy()
             except Exception as e:
                 debug_print(f"[ERROR] get_series_imdb_id_gui: error destroying picker after cancel: {e}")
             raise KeyboardInterrupt("User cancelled series matching.")
-        elif picker.selection:
-            imdb_id = picker.selection.get('imdbID') or picker.selection.get('id')
+        elif getattr(picker, 'skipped', False):
+            # User chose to skip this item
+            pass
+        elif getattr(picker, 'selection', None):
+            sel = getattr(picker, 'selection', None)
+            imdb_id = None
+            if isinstance(sel, dict):
+                imdb_id = sel.get('imdbID') or sel.get('id')
             if imdb_id:
                 debug_print(f"[INFO] User selected series imdbID={imdb_id} for '{raw_line}'")
                 imdb_cache[search_title] = imdb_id
