@@ -36,7 +36,16 @@ def apply_series_alias(name: str) -> str:
 
 def extract_movie_info(filename):
     resolution_terms = ["720p", "1080p", "2160p", "480p"]
-    # 1. If filename starts with year, always extract it
+    
+    # 1. Prefer year in parentheses (standard format) - match (YYYY) first
+    match_paren_year = re.match(r"^(.*?)[\s._-]*\((\d{4})\)[\s._\-]*(.*)$", filename)
+    if match_paren_year:
+        title = match_paren_year.group(1).strip().replace('.', ' ').replace('_', ' ')
+        year = match_paren_year.group(2)
+        extras = clean_extras(match_paren_year.group(3), keep_dots=False)
+        return title, year, extras
+    
+    # 2. If filename starts with year, extract it
     match_start_year = re.match(r"^((?:19|20)\d{2})[\s._-]+(.*)$", filename)
     if match_start_year:
         year = match_start_year.group(1)
@@ -44,19 +53,31 @@ def extract_movie_info(filename):
         title = rest.strip().replace('.', ' ').replace('_', ' ')
         return title, year, ""
 
-    # 2. Try to match year anywhere except if followed by 'p' (resolution)
-    match = re.match(r"^(.*?)[\s._\[(\-]*((?:19|20)\d{2})(?!p)[\s._\])\-]*(.*)$", filename)
-    if match:
-        title = match.group(1).strip().replace('.', ' ').replace('_', ' ')
-        year = match.group(2)
-        extras = clean_extras(match.group(3), keep_dots=False)
-        # If year is actually a resolution, move it to extras
-        for res in resolution_terms:
-            if str(year) + "p" in filename:
-                extras = (extras + " " + str(year) + "p").strip() if extras else str(year) + "p"
-                year = None
-                break
-        return title, year, extras
+    # 3. Find all years in filename and try to use the LAST one (most likely to be release year, not part of title)
+    # Pattern matches year not followed by 'p' (to avoid matching resolutions like 2160p)
+    year_matches = list(re.finditer(r'(?:^|[\s._\[(-])((?:19|20)\d{2})(?!p)(?=[\s._\])\-]|$)', filename))
+    
+    if year_matches:
+        # Try from last match backwards to find a valid year
+        for match in reversed(year_matches):
+            year = match.group(1)
+            year_pos = match.start(1)
+            
+            # Split title and extras at year position
+            title = filename[:year_pos].strip().replace('.', ' ').replace('_', ' ')
+            extras_raw = filename[match.end():].strip()
+            extras = clean_extras(extras_raw, keep_dots=False)
+            
+            # Verify year is not a resolution
+            is_resolution = False
+            for res in resolution_terms:
+                if str(year) + "p" in filename:
+                    is_resolution = True
+                    break
+            
+            if not is_resolution and title:
+                return title, year, extras
+    
     return None, None, None
 
 

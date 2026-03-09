@@ -152,7 +152,7 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
                             filter_type = entry.get('type') if entry and 'type' in entry else None
                             top = tk.Toplevel(app_root)
                             top.title("Pick Existing Cache Entry")
-                            top.geometry("500x400+200+200")
+                            top.geometry("650x530+200+200")
                             frame = ExistingCachePickerFrame(top, file.name, mid or '', picker_callback, filter_type=filter_type)
                             frame.pack(fill='both', expand=True)
                             top.transient(app_root.winfo_toplevel())
@@ -164,7 +164,12 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
                                 pass
                             imdb_id_selected = selected_id['imdb_id']
                             ui_debug_print(f"[DEBUG] Picker done, imdb_id_selected={imdb_id_selected} (type={type(imdb_id_selected)}) for {file.name}")
-                            if imdb_id_selected:
+                            
+                            # Handle special signals from cache picker
+                            if imdb_id_selected == "__RESCRAPE__":
+                                ui_debug_print(f"[DEBUG] Cache picker signaled rescrape for {file.name}")
+                                matched['rescrape_later'] = True
+                            elif imdb_id_selected:
                                 from core.media_metadata_cache import get_entry as _get_entry
                                 meta = _get_entry(imdb_id_selected)
                                 ui_debug_print(f"[DEBUG] Metadata fetched for imdb_id_selected: {meta}")
@@ -172,6 +177,7 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
                                     matched['imdb_id'] = imdb_id_selected
                                     matched['meta'] = meta
                                     matched['found'] = True
+                            # If None, user went back - do nothing, year mismatch prompt stays open
                         except Exception as e:
                             ui_debug_print(f"[DEBUG] Failed to fetch metadata for use_cache: {e}")
                     elif isinstance(action, str) and action.startswith('tt'):
@@ -206,42 +212,106 @@ def match_movie_metadata(orig_title, orig_year, metadata, file, debug_print):
                     picker_break = True
         if picker_break:
             break
-    return matched
-
+    
     # Sanity: If we somehow have an imdb_id but meta is missing or not a dict, try to resolve it
     try:
-        if matched.get('imdb_id') and not isinstance(matched.get('meta'), dict):
-            ui_debug_print(f"[SANITY] match_movie_metadata: imdb_id present but meta missing/invalid for file {file.name}: imdb_id={matched.get('imdb_id')}, meta={matched.get('meta')}")
+        imdb_id_to_check = matched.get('imdb_id')
+        if imdb_id_to_check and not isinstance(matched.get('meta'), dict):
+            ui_debug_print(f"[SANITY] match_movie_metadata: imdb_id present but meta missing/invalid for file {file.name}: imdb_id={imdb_id_to_check}, meta={matched.get('meta')}")
             try:
                 from core.media_metadata_cache import get_entry as _get_entry
-                fetched = _get_entry(matched.get('imdb_id'))
+                fetched = _get_entry(imdb_id_to_check)
                 ui_debug_print(f"[SANITY] match_movie_metadata: fetched meta type={type(fetched)} value={fetched}")
                 if isinstance(fetched, dict):
                     matched['meta'] = fetched
                     matched['found'] = True
             except Exception as e:
-                ui_debug_print(f"[SANITY] match_movie_metadata: failed to fetch meta for {matched.get('imdb_id')}: {e}")
+                ui_debug_print(f"[SANITY] match_movie_metadata: failed to fetch meta for {imdb_id_to_check}: {e}")
     except Exception:
         pass
+    
+    return matched
 
 
 # --- Build Extras for Filename ---
-def build_extras(orig_title, meta_title, orig_year, meta_year, orig_extras):
+def build_extras(orig_title, meta_title, orig_year, meta_year, orig_extras, old_imdb_id=None, new_imdb_id=None):
     """
     Build an 'extras' string for the filename from any lost or differing info (title, year, extras).
     Ensures that information not present in the metadata but present in the original filename is preserved.
+    If old_imdb_id differs from new_imdb_id, the old one is preserved in extras.
     """
+    import unicodedata
+    
     lost_info = []
-    if orig_title and meta_title and orig_title.strip().lower() != meta_title.strip().lower():
-        diff = get_title_diff(orig_title.strip(), meta_title.strip())
-        if diff:
-            lost_info.append(diff)
+    
+    # Normalize titles to check for real differences (ignoring punctuation/spacing)
+    def _normalize_for_comparison(title):
+        if not title:
+            return ""
+        title = unicodedata.normalize("NFKD", str(title))
+        # map dash variants to ASCII hyphen
+        title = re.sub(r"[‐-‒–—―]", "-", title)
+        title = title.replace("&", "and")
+        # replace dots with spaces for acronyms (E.T. -> E T)
+        title = re.sub(r"\.", " ", title)
+        # remove ! and ?
+        title = title.replace("!", "").replace("?", "")
+        # remove punctuation but keep spaces and hyphens
+        title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE)
+        # replace hyphens with spaces so "Extra-Terrestrial" and "Extra Terrestrial" match
+        title = title.replace("-", " ")
+        # collapse multiple spaces
+        title = re.sub(r"\s+", " ", title).strip().lower()
+        return title
+    
+    # Check for title difference (ignoring punctuation)
+    if orig_title and meta_title:
+        norm_orig = _normalize_for_comparison(orig_title)
+        norm_meta = _normalize_for_comparison(meta_title)
+        
+        # Only call get_title_diff if normalized forms are actually different
+        if norm_orig != norm_meta:
+            diff = get_title_diff(orig_title.strip(), meta_title.strip())
+            if diff and diff.strip():
+                # Filter out 4-digit years from diff (titles like "2001")
+                diff_cleaned = ' '.join([w for w in diff.split() if not re.match(r'^\d{4}$', w)])
+                if diff_cleaned.strip():
+                    lost_info.append(diff_cleaned.strip())
+    
+    # Add year if different
     if orig_year and meta_year and orig_year != meta_year:
         lost_info.append(orig_year)
+    
+    # Clean and add orig_extras
     if orig_extras:
-        lost_info.append(orig_extras)
-    lost_info = [x for x in lost_info if x and x.strip() and x.strip().lower() not in (meta_title.strip().lower(), meta_year)]
-    return " - ".join(lost_info) if lost_info else ""
+        cleaned = orig_extras
+        # Only remove the NEW IMDb ID (the correct one that will be appended)
+        if new_imdb_id:
+            cleaned = re.sub(r'\[?' + re.escape(new_imdb_id) + r'\]?', '', cleaned)
+        # Remove all brackets
+        cleaned = re.sub(r'[\[\]()]', '', cleaned)
+        # Remove meta_year if present
+        if meta_year:
+            cleaned = re.sub(r'\b' + str(meta_year) + r'\b', '', cleaned)
+        # Clean up multiple spaces and dashes
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = cleaned.strip(' -')
+        
+        if cleaned:
+            lost_info.append(cleaned)
+    
+    # Filter empty items
+    lost_info = [x.strip() for x in lost_info if x and x.strip()]
+    
+    # Build result
+    result = " - ".join(lost_info) if lost_info else ""
+    
+    # Final cleanup of separators
+    result = result.strip()
+    result = re.sub(r'^[\s\-]+', '', result)  # Remove leading dashes/spaces
+    result = re.sub(r'[\s\-]+$', '', result)  # Remove trailing dashes/spaces
+    
+    return result
 
 
 # --- Main File Processing Logic ---
@@ -421,10 +491,14 @@ def process_file(file: Path, preview_only=False, rename_files=True, selected_fil
     # Build new filename and destination path
     meta_title = meta.get('title', orig_title)
     meta_year = meta.get('year', orig_year)
-    extras = build_extras(orig_title, meta_title, orig_year, meta_year, orig_extras)
+    
+    # Sanitize title to prevent path separator issues (e.g., "Naked Gun 33 1/3" -> "Naked Gun 33 1-3")
+    meta_title_sanitized = meta_title.replace('/', '-').replace('\\', '-') if meta_title else meta_title
+    
+    extras = build_extras(orig_title, meta_title, orig_year, meta_year, orig_extras, old_imdb_id=imdb_id_in_name, new_imdb_id=imdb_id)
 
-    filename = build_new_filename(meta_title, meta_year, extras, imdb_id, file.suffix)
-    folder_name = f"{meta_title} ({meta_year})" if CREATE_MOVIE_SUBFOLDERS else ""
+    filename = build_new_filename(meta_title_sanitized, meta_year, extras, imdb_id, file.suffix)
+    folder_name = f"{meta_title_sanitized} ({meta_year})" if CREATE_MOVIE_SUBFOLDERS else ""
     dest_folder, dest_path = get_destination_path(file, folder_name, filename, MOVIES_DIR, MOVIE_FOLDER_LOCATION, CREATE_MOVIE_SUBFOLDERS)
     def normalize_filename(name: str) -> str:
         return name.replace(" ", "").lower()
@@ -502,7 +576,8 @@ def rename_movie(src: Path, dest: Path):
     subs = move_subtitles(src, dest)
     shutil.move(str(src), str(dest))
     log_rename(src, dest, subs)
-    print(f"✅ Moved: {src.name}")
+    #print(f"✅ Moved: {src.name}")
+    print(f"✅ Finished: {src.name}")
 
 
 

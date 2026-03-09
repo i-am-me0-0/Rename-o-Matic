@@ -12,6 +12,7 @@ from PIL import Image, ImageTk
 from config import OMDB_API_KEY, OMDB_BASE_URL, OMDB_REQUEST_DELAY, OMDB_SEARCH_LIMIT, USER_AGENTS, IMDB_CACHE_FILE, debug_print
 from typing import Optional, Callable, Any, Union, cast, Dict, List, Tuple
 import threading
+from datetime import datetime, timedelta
 from core.media_metadata_cache import set_entry, update_entry, add_episode_to_series, get_entry
 from actions.custom_imdb_web_poster_scraper import fetch_poster_url_and_store, scrape_full_movie_metadata
 
@@ -130,6 +131,110 @@ def save_cache() -> None:
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(imdb_cache, f, indent=2, ensure_ascii=False)
 
+# ---- OMDB Request Tracking ----
+
+REQUEST_TRACKING_FILE = Path('cache/omdb_request_tracking.json')
+request_tracking_data: Dict[str, Any] = {}
+
+def load_request_tracking() -> None:
+    """Load request tracking data and clean entries older than 2 days."""
+    global request_tracking_data
+    if REQUEST_TRACKING_FILE.exists():
+        try:
+            with open(REQUEST_TRACKING_FILE, 'r', encoding='utf-8') as f:
+                request_tracking_data = json.load(f)
+        except Exception as e:
+            debug_print(f"[WARN] Failed to load request tracking: {e}")
+            request_tracking_data = {'api_keys': {}}
+    else:
+        request_tracking_data = {'api_keys': {}}
+    
+    # Clean up old entries (older than 2 days)
+    cutoff_date = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+    for api_key_data in request_tracking_data.get('api_keys', {}).values():
+        if 'requests_by_date' in api_key_data:
+            old_dates = [d for d in api_key_data['requests_by_date'].keys() if d < cutoff_date]
+            for old_date in old_dates:
+                del api_key_data['requests_by_date'][old_date]
+
+def save_request_tracking() -> None:
+    """Save request tracking data to disk."""
+    try:
+        REQUEST_TRACKING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(REQUEST_TRACKING_FILE, 'w', encoding='utf-8') as f:
+            json.dump(request_tracking_data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        debug_print(f"[ERROR] Failed to save request tracking: {e}")
+
+def increment_request_count(api_key: str) -> None:
+    """Increment the request count for today for the given API key."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    if 'api_keys' not in request_tracking_data:
+        request_tracking_data['api_keys'] = {}
+    
+    if api_key not in request_tracking_data['api_keys']:
+        request_tracking_data['api_keys'][api_key] = {
+            'key_label': 'Key Name',
+            'user_note': 'Free tier - 1000/day',
+            'daily_limit': 1000,
+            'requests_by_date': {}
+        }
+    
+    api_data = request_tracking_data['api_keys'][api_key]
+    
+    # Add missing fields to existing entries
+    if 'key_label' not in api_data:
+        api_data['key_label'] = 'Key Name'
+    if 'user_note' not in api_data:
+        api_data['user_note'] = 'Free tier - 1000/day'
+    if 'daily_limit' not in api_data:
+        api_data['daily_limit'] = 1000
+    if 'requests_by_date' not in api_data:
+        api_data['requests_by_date'] = {}
+    
+    if today not in api_data['requests_by_date']:
+        api_data['requests_by_date'][today] = 0
+    
+    api_data['requests_by_date'][today] += 1
+    save_request_tracking()
+    
+    # Optional: warn if approaching limit
+    check_limit_warning(api_key)
+
+def get_usage_stats(api_key: str) -> Dict[str, Any]:
+    """Get usage statistics for the given API key."""
+    if api_key not in request_tracking_data.get('api_keys', {}):
+        return {'today': 0, 'yesterday': 0, 'limit': 1000, 'key_label': 'unknown key'}
+    
+    api_data = request_tracking_data['api_keys'][api_key]
+    today = datetime.now().strftime('%Y-%m-%d')
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    requests_by_date = api_data.get('requests_by_date', {})
+    return {
+        'today': requests_by_date.get(today, 0),
+        'yesterday': requests_by_date.get(yesterday, 0),
+        'limit': api_data.get('daily_limit', 1000),
+        'key_label': api_data.get('key_label', 'main key'),
+        'user_note': api_data.get('user_note', '')
+    }
+
+def check_limit_warning(api_key: str) -> None:
+    """Print warning if approaching daily limit."""
+    stats = get_usage_stats(api_key)
+    today_count = stats['today']
+    limit = stats['limit']
+    
+    if today_count >= limit * 0.9:  # 90% threshold
+        percentage = (today_count / limit) * 100
+        print(f"⚠️  WARNING: OMDB API usage at {percentage:.1f}% ({today_count}/{limit} requests today)")
+        if today_count >= limit:
+            print(f"❌ DAILY LIMIT REACHED: {today_count}/{limit} requests used today!")
+
+# Load tracking data on module import
+load_request_tracking()
+
 # def parse_title(title_line: str) -> tuple[str, Optional[str]]:
 #     line = title_line.strip().strip('"')
 #     year = None
@@ -160,7 +265,8 @@ def parse_title(title_line: str) -> Tuple[str, Optional[str]]:
         year = match.group(1)
         line = re.sub(r'\s*\(\d{4}\)', '', line)  # remove the year from title
 
-    return line.strip(), year
+    # Strip whitespace and common separators (-, _, .) that may be left after year removal
+    return line.strip().rstrip('-_. '), year
 
 
 def search_omdb(title: str) -> List[Dict[str, Any]]:
@@ -168,12 +274,45 @@ def search_omdb(title: str) -> List[Dict[str, Any]]:
     global omdb_request_count
     try:
         omdb_request_count += 1
+        increment_request_count(OMDB_API_KEY)
         print(f"[OMDb] Request #{omdb_request_count}: {OMDB_BASE_URL} params={params}")
         resp = requests.get(OMDB_BASE_URL, params=params, timeout=10)
         data = resp.json()
         return data.get('Search', []) if data.get('Response') == 'True' else []
     except Exception:
         return []
+
+
+def transform_omdb_poster_url(url: Optional[str]) -> Optional[str]:
+    """Transform an OMDb/amazon image URL to a higher-resolution variant.
+
+    Many OMDb poster URLs use a size token like `_V1_SX300.jpg`.
+    Replace that suffix with a higher-resolution variant used elsewhere in
+    the cache (for example `_V1_FMjpg_UX1000_.jpg`). If the URL already
+    appears to be high-res, return it unchanged.
+    """
+    if not url:
+        return None
+    try:
+        # If it already looks like a full-resolution URL, keep it
+        if 'FMjpg' in url or 'UX' in url or '_V1_FM' in url:
+            return url
+
+        # Prefer amazon m.media-amazon.com images; otherwise return original
+        if 'm.media-amazon.com' not in url:
+            return url
+
+        # Replace the _V1_...<ext> suffix with a high-res variant
+        m = re.search(r'(_V1_).*?(\.(jpg|png))$', url)
+        if m:
+            new = re.sub(r'(_V1_).*?(\.(jpg|png))$', r'_V1_FMjpg_UX1000_\2', url)
+            return new
+
+        # Fallback: replace common SX/NX size tokens
+        new = re.sub(r'SX\d+|SY\d+|UX\d+', 'FMjpg_UX1000_', url)
+        return new
+    except Exception:
+        return url
 
 # ---- GUI Picker ----
 from gui.picker import Picker
@@ -188,6 +327,8 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
     """
     if search_title is None:
         search_title, _ = parse_title(raw_line)
+    # Always strip whitespace and common separators to prevent trailing chars in cache keys
+    search_title = search_title.strip().rstrip('-_. ') if search_title else search_title
     cached_id = imdb_cache.get(search_title)
 
     # Only prompt if the cache is missing or the title/year is missing or mismatched, unless force_prompt is True
@@ -300,6 +441,8 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
     """
     if search_title is None:
         search_title, _ = parse_title(raw_line)
+    # Always strip whitespace and common separators to prevent trailing chars in cache keys
+    search_title = search_title.strip().rstrip('-_. ') if search_title else search_title
     cached_id = imdb_cache.get(search_title)
     if cached_id:
         # Use metadata cache to check for title/year
@@ -479,6 +622,7 @@ def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[in
         try:
             global omdb_request_count
             omdb_request_count += 1
+            increment_request_count(OMDB_API_KEY)
             print(f"[OMDb] Request #{omdb_request_count}: {OMDB_BASE_URL} params={params}")
             # Perform the HTTP request directly here. When fetch_episode_ids_omdb is
             # invoked from a background worker (via safe_request), this will not block
@@ -521,9 +665,11 @@ def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[in
                         # Fetch episode details and add to metadata
                         ep_title = ep.get('Title')
                         ep_year = ep.get('Released', '')[:4] if ep.get('Released') else ''
+                        ep_released = ep.get('Released', '') if ep.get('Released') else ''
                         ep_data = {
                             'title': ep_title,
                             'year': ep_year,
+                            'released': ep_released,
                             'type': 'episode',
                             'summary': '',
                             'poster_url': ''
@@ -566,6 +712,7 @@ def fetch_title_and_year_from_imdb_id(imdb_id: str, populate_episodes: bool = Fa
     global omdb_request_count
     try:
         omdb_request_count += 1
+        increment_request_count(OMDB_API_KEY)
         print(f"[OMDb] Request #{omdb_request_count}: {OMDB_BASE_URL} params={params}")
         resp = requests.get(OMDB_BASE_URL, params=params, timeout=10)
         data = resp.json()
@@ -575,6 +722,7 @@ def fetch_title_and_year_from_imdb_id(imdb_id: str, populate_episodes: bool = Fa
             plot = data.get('Plot')
             type_ = data.get('Type')
             ts = data.get('totalSeasons')
+            released = data.get('Released')
 
             # Merge/update logic: only add missing title/year/type or update when OMDb provides richer info
             try:
@@ -615,6 +763,10 @@ def fetch_title_and_year_from_imdb_id(imdb_id: str, populate_episodes: bool = Fa
                 if type_:
                     updates['type'] = type_
 
+            # Released: add if missing (important for episodes)
+            if released and not existing.get('released'):
+                updates['released'] = released
+
             # Summary: add if missing
             if plot and not existing.get('summary'):
                 updates['summary'] = plot
@@ -625,10 +777,28 @@ def fetch_title_and_year_from_imdb_id(imdb_id: str, populate_episodes: bool = Fa
                 except Exception:
                     pass
 
-            # Optionally fetch poster (separate HTTP request)
+            # Optionally fetch poster (prefer OMDb Poster when available)
             if fetch_poster:
                 try:
-                    fetch_poster_url_and_store(imdb_id)
+                    poster_field = data.get('Poster') if isinstance(data, dict) else None
+                    if poster_field and poster_field not in ('N/A', ''):
+                        try:
+                            transformed = transform_omdb_poster_url(poster_field)
+                            if transformed:
+                                update_entry(imdb_id, {'poster_url': transformed})
+                        except Exception:
+                            # If transforming or updating fails, fallback to scraper
+                            try:
+                                fetch_poster_url_and_store(imdb_id)
+                            except Exception:
+                                pass
+                    else:
+                        # No OMDb poster available; fallback to IMDb scraper
+                        try:
+                            debug_print("[imdb-fallback] scraping poster from imdb")
+                            fetch_poster_url_and_store(imdb_id)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 

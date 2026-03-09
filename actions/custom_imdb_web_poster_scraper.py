@@ -9,7 +9,8 @@ from typing import List, Optional
 import os
 import re
 from pathlib import Path
-from config import MOVIES_DIR, SERIES_DIR, USER_AGENTS, SCRAPE_MOVIE_POSTERS, SCRAPE_SERIES_THUMBNAILS, SCRAPE_SERIES_ROOT_FOLDERS
+from config import MOVIES_DIR, SERIES_DIR, USER_AGENTS
+#, SCRAPE_MOVIE_POSTERS, SCRAPE_SERIES_THUMBNAILS, SCRAPE_SERIES_ROOT_FOLDERS
 from core.media_metadata_cache import update_entry, get_entry
 
 BASE_URL = "https://www.imdb.com/title/{imdb_id}/"
@@ -81,10 +82,19 @@ def extract_imdb_id(text: str) -> Optional[str]:
 
 
 def fetch_poster_url_and_store(imdb_id: str) -> Optional[str]:
+    # Check if URL already exists in cache
+    existing = get_entry(imdb_id)
+    if existing and existing.get("poster_url"):
+        print(f"[CACHE] Using cached poster URL for {imdb_id}")
+        return existing["poster_url"]
+    
+    # Fetch fresh from IMDb
     url = fetch_poster_url(imdb_id)
     if url:
-        # Always overwrite poster_url with the custom-scraped value
         update_entry(imdb_id, {"poster_url": url})
+        print(f"[IMDB→CACHE] Scraped and cached new poster URL for {imdb_id}")
+    else:
+        print(f"[IMDB] No poster URL found on IMDb for {imdb_id}")
     return url
 
 
@@ -103,12 +113,8 @@ def process_movie_files(video_files: List[Path]):
         if not imdb_id:
             print(f"[SKIP] No IMDb ID in {video.name}")
             continue
-        print(f"[SCRAPE] Fetching poster URL for movie {imdb_id}")
-        url = fetch_poster_url_and_store(imdb_id)
-        if url:
-            print(f"[CACHED] Poster URL for {imdb_id}: {url}")
-        else:
-            print(f"[NOT FOUND] No poster for {imdb_id}")
+        print(f"[PROCESS] Checking poster URL for movie {imdb_id}...")
+        fetch_poster_url_and_store(imdb_id)
 
 
 # def process_series_files(video_files: List[Path]):
@@ -203,14 +209,14 @@ def process_series_files(video_files: List[Path]):
             print(f"[SKIP] Thumbnail already exists: {save_path.name}")
             continue
 
-        print(f"[SCRAPE] Fetching thumbnail for {video.name}")
-        poster_url = fetch_poster_url(imdb_id)
+        print(f"[PROCESS] Checking thumbnail for {video.name}...")
+        poster_url = fetch_poster_url_and_store(imdb_id)
         if poster_url:
             success = download_image(poster_url, save_path)
             if not success:
                 print(f"[FAIL] Couldn't save thumbnail for {video.name}")
         else:
-            print(f"[NOT FOUND] No thumbnail for {video.name}")
+            print(f"[SKIP] No thumbnail URL available for {video.name}")
 
 
 def process_episode_posters_from_metadata(metadata_path: Path):
@@ -226,17 +232,10 @@ def process_episode_posters_from_metadata(metadata_path: Path):
     updated = 0
     for imdb_id, entry in metadata.items():
         if entry.get("type") == "episode" and not entry.get("poster_url"):
-            print(f"[EPISODE] Fetching poster for {imdb_id} ({entry.get('title', '')})")
-            url = fetch_poster_url(imdb_id)
+            print(f"[EPISODE] Processing {imdb_id} ({entry.get('title', '')})") 
+            url = fetch_poster_url_and_store(imdb_id)
             if url:
-                update_entry(imdb_id, {"poster_url": url})
-                print(f"[UPDATED] {imdb_id} poster_url set.")
                 updated += 1
-            else:
-                print(f"[NOT FOUND] No poster for {imdb_id}")
-    print(f"[DONE] Updated {updated} episode poster URLs.")
-
-
 def scrape_full_movie_metadata(imdb_id: str) -> dict:
     """
     Scrape title, year, summary, and poster_url from IMDb for a given movie IMDb ID.

@@ -149,6 +149,15 @@ def add_episode_to_series(series_id: str, season: str, episode: str, episode_id:
     series['episodes'][season][episode] = episode_id
     # Also add episode metadata as its own entry
     if episode_id and episode_data:
+        # Preserve poster_url and summary if they exist in the old data
+        existing = data.get(episode_id, {})
+        if existing:
+            # Copy poster_url and summary from existing entry if present and new data doesn't have them
+            if existing.get('poster_url') and not episode_data.get('poster_url'):
+                episode_data['poster_url'] = existing['poster_url']
+            if existing.get('summary') and not episode_data.get('summary'):
+                episode_data['summary'] = existing['summary']
+        # Now overwrite with the merged data
         data[episode_id] = episode_data
     save_metadata(data)
 

@@ -1,6 +1,8 @@
 __pycache__
 media
 rename_log.txt
+rename_log.txt.older
+rename_log.txt.old
 planned_renames.json
 cache
 config.ini
@@ -10,3 +12,4 @@ tools/imdb_local_api/title.episode.tsv.gz
 tools/imdb_local_api/imdb.db
 tools/imdb_local_api/imdb.db-journal
 .vscode/settings.json
+images/old/

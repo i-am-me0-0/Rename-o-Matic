@@ -10,18 +10,56 @@ class PreviewWindow(tk.Frame):
         super().__init__(master, *args, **kwargs)
         label = tk.Label(self, text="Generate Preview", font=("Arial", 14))
         label.pack(pady=10)
-        btn_generate = tk.Button(self, text="Generate Preview", command=self.do_generate)
+        
+        # Container for two columns
+        columns_frame = tk.Frame(self)
+        columns_frame.pack(pady=10)
+        
+        # Left column
+        left_column = tk.Frame(columns_frame)
+        left_column.pack(side="left", padx=10)
+        
+        btn_generate = tk.Button(left_column, text="Generate Preview", command=self.do_generate)
         btn_generate.pack(pady=5)
-        btn_blank_slate = tk.Button(self, text="Create Blank Slate", command=self.blank_planned_renames)
+        btn_blank_slate = tk.Button(left_column, text="Create Blank Slate", command=self.blank_planned_renames)
         btn_blank_slate.pack(pady=5)
-        btn_view_planned = tk.Button(self, text="View/Edit Planned Renames", command=self.open_planned_renames)
+        btn_view_planned = tk.Button(left_column, text="View/Edit Planned Renames", command=self.open_planned_renames)
         btn_view_planned.pack(pady=5)
-        btn_batch_edit = tk.Button(self, text="Batch Edit Planned Renames", command=self.open_batch_edit)
+        btn_batch_edit = tk.Button(left_column, text="Batch Edit Planned Renames", command=self.open_batch_edit)
         btn_batch_edit.pack(pady=5)
+        
+        # Divider line
+        divider = tk.Frame(columns_frame, width=2, bg="gray")
+        divider.pack(side="left", fill="y", padx=10)
+        
+        # Right column
+        right_column = tk.Frame(columns_frame)
+        right_column.pack(side="left", padx=10)
+        
+        btn_preview_cache = tk.Button(right_column, text="Preview Metadata Cache", command=self.open_cache_preview)
+        btn_preview_cache.pack(pady=5)
+        btn_omdb_scraper = tk.Button(right_column, text="OMDB Scraper", command=self.open_omdb_scraper)
+        btn_omdb_scraper.pack(pady=5)
+        
+        # Usage stats at bottom of right column
+        self.usage_label = tk.Label(right_column, text="", font=("Arial", 9), fg="gray")
+        self.usage_label.pack(pady=(20, 5))
+        self.update_usage_stats()
+        
         btn_back = tk.Button(self, text="Back", command=on_back)
         btn_back.pack(pady=10)
         self.status = tk.Label(self, text="")
         self.status.pack(pady=5)
+    
+    def update_usage_stats(self):
+        """Update the usage statistics display."""
+        try:
+            from actions.omdb_gui_scraper import get_usage_stats
+            from config import OMDB_API_KEY
+            stats = get_usage_stats(OMDB_API_KEY)
+            self.usage_label.config(text=f"Usage: {stats['key_label']}: {stats['today']}/{stats['limit']}")
+        except Exception:
+            self.usage_label.config(text="")
 
     def open_planned_renames(self):
         win = tk.Toplevel(self)
@@ -37,6 +75,41 @@ class PreviewWindow(tk.Frame):
         frame = BatchEditPlannedRenames(win)
         frame.pack(fill="both", expand=True)
         win.geometry("1400x900")
+
+    def open_cache_preview(self):
+        """Open cache picker to browse all cached metadata."""
+        from gui.existing_cache_picker import ExistingCachePickerFrame
+        win = tk.Toplevel(self)
+        win.title("Preview Metadata Cache")
+        
+        def on_selection(selected_id):
+            """Handle selection from cache preview."""
+            if selected_id:
+                # Just close the window - this is preview only
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+        
+        # Create the picker frame with empty name to show all entries
+        frame = ExistingCachePickerFrame(
+            win, 
+            name="",  # Empty name shows all entries
+            conflicting_id="",  # No conflict
+            on_choice=on_selection,
+            filter_type=None  # Show both movies and series
+        )
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        win.geometry("650x530")
+
+    def open_omdb_scraper(self):
+        """Open OMDB scraper window for manual metadata lookup."""
+        from gui.omdb_scraper_window import OMDBScraperWindow
+        win = tk.Toplevel(self)
+        win.title("OMDB Scraper")
+        frame = OMDBScraperWindow(win)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        win.geometry("700x500")
 
     def blank_planned_renames(self):
         import subprocess

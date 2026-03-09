@@ -8,8 +8,28 @@ import re
 
 # Windows forbidden chars: \/:*?"<>|
 def sanitize_path_component(component):
-    # Remove illegal characters for Windows filenames/folders
-    return re.sub(r'[\\/:*?"<>|]', ' -', component)
+    """
+    Remove illegal characters from filename component across all platforms.
+    Applies rules for Windows, Linux, and macOS without OS detection.
+    Uses separate regex checks for organization.
+    """
+    if not component:
+        return component
+    
+    # Windows forbidden characters: < > : " / \ | ? *
+    component = re.sub(r'[<>:"/\\|?*]', ' -', component)
+    # Linux/Unix forbidden: / (forward slash)
+    component = re.sub(r'/', ' -', component)
+    # macOS forbidden: : (colon in filenames)
+    component = re.sub(r':', ' -', component)
+    # All platforms: Remove control characters (ASCII 0-31, except tab, newline, carriage return)
+    component = ''.join(c for c in component if ord(c) >= 32 or c in '\t\n\r')
+    # All platforms: Remove trailing spaces and dots (Windows/macOS restriction)
+    component = component.rstrip('. ')
+    # Collapse multiple spaces
+    component = re.sub(r'\s{2,}', ' ', component)
+    
+    return component
 
 def validate_and_sanitize_path(path_str):
     # Split into parts, sanitize each, and rejoin
@@ -71,14 +91,14 @@ def generate_preview(root=None):
         debug_print(f"[ERROR] generate_preview: plan_series_renames_with_gui_prompts() raised: {e}")
         debug_print(traceback.format_exc())
         raise
-    debug_print(f"[DEBUG] generate_preview: planned count={len(planned)}")
+    debug_print(f"[DEBUG] generate_preview: planned count (unfiltered)={len(planned)}")
     if created_root:
         debug_print("[DEBUG] generate_preview: destroying temporary root")
         root.destroy()
-    if not planned:
-        print("⚠️ No files to rename.!!")
-    else:
-        print(f"📋 {len(planned)} renames planned.")
+    # if not planned:
+    #     print("⚠️ No files to rename.!!")
+    # else:
+    #     print(f"📋 {len(planned)} renames planned.")
 
     # Write as JSON array of objects
     json_entries = []
@@ -132,13 +152,25 @@ def generate_preview(root=None):
             "from": item["src"],
             "to": sanitized_to
         })
+    
+    # Report actual count after filtering out files that don't need changes
+    actual_count = len(json_entries)
+    debug_print(f"[DEBUG] generate_preview: planned count (filtered)={actual_count}")
+    if actual_count == 0:
+        print("⚠️ No files to rename.!!")
+    else:
+        print(f"📋 {actual_count} renames planned.")
+        
     with open(PLANNED_RENAMES_FILE, "w", encoding="utf-8") as f:
         json.dump(json_entries, f, indent=2, ensure_ascii=False)
     print(f"📄 Preview written to {PLANNED_RENAMES_FILE}. Review and edit as needed.")
     # Safely import the global OMDb request counter (if present) and print it.
     try:
-        from actions.omdb_gui_scraper import omdb_request_count
+        from actions.omdb_gui_scraper import omdb_request_count, get_usage_stats
+        from config import OMDB_API_KEY
         print(f"🔎 OMDb was accessed {omdb_request_count} times.")
+        stats = get_usage_stats(OMDB_API_KEY)
+        print(f"📊 Today's usage of {stats['key_label']}: {stats['today']}/{stats['limit']} requests (Yesterday: {stats['yesterday']})")
     except Exception:
         # Best-effort: if the counter isn't available or import fails, silently continue
         pass

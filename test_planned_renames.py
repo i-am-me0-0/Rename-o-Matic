@@ -10,18 +10,21 @@ from config import PLANNED_RENAMES_FILE, MOVIES_DIR, SERIES_DIR, debug_print
 # Static lists extracted from the current `planned_renames.json` (relative to
 # testLibrary/movies and testLibrary/series). Edit these lists as needed.
 STATIC_MOVIES = [
+    "2001 - A Space Odyssey (1968) [REMASTERED 720p BluRay x265 10Bit] [tt0062622].mkv",
+    "Naked Gun 33 1-3 - The Final Insult (1994) [720p BluRay x265 10Bit] [tt0110622].mkv",
     "The Matrix (1999) [1080p BluRay x264] [tt0133093].mkv",
     "Ace Ventura - Pet Detective (1994) [REMASTERED 720p BluRay x265 10Bit] [tt0109040].mkv",
-    "Back to the Future (1985) [wrong id] [tt0088762] [tt0088763].mkv",
-    "Limitless (2011) [2000 - 0 tt1219289].mkv",
+    "Back to the Future (1985) [wrong id tt0088762] [tt0088763].mkv",
+    "Limitless (2011) [2000 - 0] [tt1219289].mkv",
     "Elysium (2013) [720p BluRay x265 6CH] [tt1535108].mkv",
+    "Blade Runner 2049 (2017) [720p BluRay x265] [tt1856101].mkv",
     "I, Robot (2004) [finished] [tt0343818].mkv",
     "Kung Fu Panda 3 (2016) [720p WEB-DL x265 ESub] [tt2267968].mkv",
     "Mission - Impossible - The Final Reckoning (2025) [720p - WEB-DL x265 10Bit] [tt9603208].mkv",
     "RoboCop (1987) [1980] [tt0093870].mkv",
     "RoboCop (2014) [tt1234721].mkv",
     "WALL·E (2008) [720p BluRay x264] [tt0910970].mkv",
-    "avatar/Avatar (2009) [Collector's Extended Edition - BluRay] [x265] [EN NL Subs] [tt0499549].mkv",
+    "avatar/Avatar (2009) [Collector's Extended Edition - BluRay x265 EN NL Subs] [tt0499549].mkv",
 ]
 
 STATIC_SERIES = [

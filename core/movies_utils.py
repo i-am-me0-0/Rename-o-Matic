@@ -57,6 +57,31 @@ def get_title_diff(orig_title, meta_title):
     """Return the words in orig_title that are not in meta_title, preserving order."""
     if not orig_title or not meta_title:
         return orig_title or ''
+
+    import re
+    import unicodedata
+
+    # Normalize whole titles first to ignore punctuation/acronym differences
+    def _normalize_title(title: str) -> str:
+        title = unicodedata.normalize("NFKD", str(title))
+        # map dash variants to ASCII hyphen
+        title = re.sub(r"[‐-‒–—―]", "-", title)
+        title = title.replace("&", "and")
+        # replace dots with spaces for acronyms (E.T. -> E T)
+        title = re.sub(r"\.", " ", title)
+        # remove ! and ?
+        title = title.replace("!", "").replace("?", "")
+        # remove punctuation but keep spaces and hyphens
+        title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE)
+        # replace hyphens with spaces so "Extra-Terrestrial" and "Extra Terrestrial" match
+        title = title.replace("-", " ")
+        # collapse multiple spaces
+        title = re.sub(r"\s+", " ", title).strip().lower()
+        return title
+
+    if _normalize_title(orig_title) == _normalize_title(meta_title):
+        return ""
+
     # Split into words
     orig_words = orig_title.split()
     meta_words = meta_title.split()
@@ -64,7 +89,6 @@ def get_title_diff(orig_title, meta_title):
     # Normalization helper: remove common punctuation and lowercase for fuzzy matching.
     # This makes "Charlie's" and "Charlies" compare equal and avoids spurious diffs
     # caused only by punctuation differences.
-    import re
     def _normalize_word(w: str) -> str:
         # remove punctuation characters (keep alphanumerics and underscore), lower-case
         return re.sub(r"[^\w]", "", w).lower()

@@ -12,45 +12,95 @@ import sys
 CONFIG_FILE = Path(os.environ.get("RENAMER_CONFIG_FILE", "config.ini"))
 
 DEFAULTS = {
+    # ============================================================================
+    # [Essential Settings] - Edit these regularly
+    # ============================================================================
+    
     "Paths": {
+        # Your media library locations
         "movies_dir": "./testLibrary/movies",
-        "series_dir": "./testLibrary/series",
-        "log_file": "rename_log.txt",
-        "dry_run_log": "dry_run_log.txt",
-        "planned_renames_file": "planned_renames.json"
+        "series_dir": "./testLibrary/series"
     },
+    
+    "OMDb": {
+        # Your OMDb API key (get one at http://www.omdbapi.com/apikey.aspx)
+        "omdb_api_key": "key"
+    },
+    
+    "SeriesAliases": {
+        # Map non-standard folder names to proper series names
+        # Format: folder_name = Canonical Series Name
+        #"alias-1": "Alias 1",
+        #"alias-2": "Alias 2"
+    },
+    
+    # ============================================================================
+    # [General Settings] - Occasionally adjusted
+    # ============================================================================
+    
+    "General": {
+        # Subtitle language codes (comma-separated, blank = no language tag)
+        "lang_codes": ", ".join(["", "en", "de", "fr", "es", "nl"]),
+        
+        # Where to create movie folders: 'root' (in movies_dir) or 'source' (keep in original subfolder)
+        "movie_folder_location": "root",
+        
+        # Whether to create subfolders for each movie (true/false)
+        "create_movie_subfolders": "False",
+        
+        # New entries in preview are checked by default (1) or unchecked (0)
+        "default_include": "1",
+        
+        # Include episode title in extras tag (true/false)
+        "prepend_episode_title_to_extras": "True",
+        
+        # Console debug output (true/false) - shows internal processing details
+        "debug_mode": "False",
+        
+        # UI debug output (true/false) - shows detailed GUI diagnostics
+        "ui_debug": "False",
+        
+        # Skip these IMDb IDs during processing (comma-separated)
+        "skip_imdb_ids": ""
+    },
+    
     "Extensions": {
+        # Recognized file extensions (comma-separated)
         "video": ".mkv, .mp4, .avi",
         "subtitle": ".srt"
     },
+    
     "Series": {
-        "edge_keywords": ""#"animated movie cut"
-        
+        # Keywords that indicate special/edge-case episodes (comma-separated)
+        "edge_keywords": ""
     },
-    "SeriesAliases": {
-        "alias-1": "Alias 1",
-        "alias-2": "Alias 2"
-    },
-    "General": {
-        "lang_codes": ", ".join(["", "en", "de", "fr", "es", "nl"]),
-        "movie_folder_location": "root",  # or "source"
-        "default_include": "1",           # or "0"
-        "create_movie_subfolders": "False",  # or False
-        "log_level": "info",  # or "debug", "warning", "error", "critical"
-        "prepend_episode_title_to_extras": "True",  # or False
-        "ui_debug": "False"
-    },
-    "OMDb": {
-        "omdb_api_key": "key",
+    
+    # ============================================================================
+    # [Advanced Settings] - Rarely need changes
+    # ============================================================================
+    
+    "OMDbAdvanced": {
+        # OMDb API endpoint (change for testing with local stub)
         "omdb_base_url": "http://www.omdbapi.com/",
+        
+        # Delay between OMDb API requests (seconds)
         "omdb_request_delay": "0.2",
+        
+        # Maximum search results to consider
         "omdb_search_limit": "5",
+        
+        # User agent strings for web scraping (comma-separated, use double quotes)
         "user_agents": '"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/114.0.0.0 Safari/537.36, Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"'
     },
-    "PosterScraper": {
-        "scrape_movie_posters": "true",
-        "scrape_series_thumbnails": "true",
-        "scrape_series_root_folders": "true"
+    
+    "InternalPaths": {
+        # Cache and log file names (change only if you know what you're doing)
+        "log_file": "rename_log.txt",
+        "episode_cache_file": "episode_cache.json",
+        "manual_episode_cache_file": "manual_episode_cache.json",
+        "manual_episode_title_cache_file": "manual_episode_title_cache.json",
+        "imdb_cache_file": "imdb_cache.json",
+        "planned_renames_file": "planned_renames.json"
     }
 }
 
@@ -79,10 +129,8 @@ def init_config():
         for section, opts in DEFAULTS.items():
             config[section] = opts
         with open(CONFIG_FILE, "w", encoding="utf-8") as cfg:
-            cfg.write("# Configuration file for renamer\n")
-            cfg.write("# create_folders: whether to create destination folders\n")
-            cfg.write("# perform_rename: whether to actually rename/move files\n")
-            cfg.write("# omdb_api_key: replace with your key\n\n")
+            cfg.write("# Media Renamer Configuration\n")
+            cfg.write("# Essential settings at top, advanced settings at bottom\n\n")
             config.write(cfg)
         print(f"[config] Created default configuration at {CONFIG_FILE}")
     # Read config with inline comments stripped
@@ -95,8 +143,7 @@ cfg = init_config()
 
 MOVIES_DIR = Path(cfg["Paths"]["movies_dir"])
 SERIES_DIR = Path(cfg["Paths"]["series_dir"])
-LOG_FILE = Path(cfg["Paths"]["log_file"])
-#DRY_RUN_LOG_FILE = Path(cfg["Paths"]["dry_run_log"])
+LOG_FILE = Path(cfg["InternalPaths"]["log_file"])
 
 
 VIDEO_EXTENSIONS = [ext.strip() for ext in cfg["Extensions"]["video"].split(",")]
@@ -116,18 +163,18 @@ DEFAULT_INCLUDE = cfg["General"].get("default_include", "1").strip()
 PREPEND_EPISODE_TITLE_TO_EXTRAS = cfg["General"].get("prepend_episode_title_to_extras", "True").strip().lower()
 
 # OMDb API config
-OMDB_API_KEY = cfg["OMDb"].get("omdb_api_key", "key").strip()
-OMDB_BASE_URL = cfg["OMDb"].get("omdb_base_url", "http://www.omdbapi.com/").strip()
-OMDB_REQUEST_DELAY = float(cfg["OMDb"].get("omdb_request_delay", "0.2"))
-OMDB_SEARCH_LIMIT = int(cfg["OMDb"].get("omdb_search_limit", "5"))
-USER_AGENTS = [ua.strip().strip('"') for ua in cfg["OMDb"].get("user_agents", "").split(",") if ua.strip()]
+OMDB_API_KEY = cfg["OMDb"]["omdb_api_key"].strip()
+OMDB_BASE_URL = cfg["OMDbAdvanced"]["omdb_base_url"].strip()
+OMDB_REQUEST_DELAY = float(cfg["OMDbAdvanced"]["omdb_request_delay"])
+OMDB_SEARCH_LIMIT = int(cfg["OMDbAdvanced"]["omdb_search_limit"])
+USER_AGENTS = [ua.strip().strip('"') for ua in cfg["OMDbAdvanced"]["user_agents"].split(",") if ua.strip()]
 # CREATE_MOVIE_SUBFOLDERS = cfg["General"].get("create_movie_subfolders", "").strip()
-CREATE_MOVIE_SUBFOLDERS = cfg["General"].get("create_movie_subfolders", "True").strip().lower() == "true"
+CREATE_MOVIE_SUBFOLDERS = cfg["General"].get("create_movie_subfolders", "False").strip().lower() == "true"
 
 # Poster scraper options
-SCRAPE_MOVIE_POSTERS = cfg["PosterScraper"].get("scrape_movie_posters", "true").strip().lower() == "true"
-SCRAPE_SERIES_THUMBNAILS = cfg["PosterScraper"].get("scrape_series_thumbnails", "true").strip().lower() == "true"
-SCRAPE_SERIES_ROOT_FOLDERS = cfg["PosterScraper"].get("scrape_series_root_folders", "true").strip().lower() == "true"
+# SCRAPE_MOVIE_POSTERS = cfg["PosterScraper"].get("scrape_movie_posters", "true").strip().lower() == "true"
+# SCRAPE_SERIES_THUMBNAILS = cfg["PosterScraper"].get("scrape_series_thumbnails", "true").strip().lower() == "true"
+# SCRAPE_SERIES_ROOT_FOLDERS = cfg["PosterScraper"].get("scrape_series_root_folders", "true").strip().lower() == "true"
 
 # Preview file
 #PREVIEW_FILE = Path(cfg["Paths"].get("preview_file", "planned_renames.txt"))
@@ -135,19 +182,13 @@ SCRAPE_SERIES_ROOT_FOLDERS = cfg["PosterScraper"].get("scrape_series_root_folder
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-# Manual episode cache file
-MANUAL_EPISODE_CACHE_FILE = CACHE_DIR / cfg["Paths"].get("manual_episode_cache_file", "manual_episode_cache.json")
+# Cache and log file paths
+MANUAL_EPISODE_CACHE_FILE = CACHE_DIR / cfg["InternalPaths"]["manual_episode_cache_file"]
+MANUAL_EPISODE_TITLE_CACHE_FILE = CACHE_DIR / cfg["InternalPaths"]["manual_episode_title_cache_file"]
+IMDB_CACHE_FILE = CACHE_DIR / cfg["InternalPaths"]["imdb_cache_file"]
+PLANNED_RENAMES_FILE = Path(cfg["InternalPaths"]["planned_renames_file"])
 
-# Manual episode title cache file (for manual episode title→id mapping)
-MANUAL_EPISODE_TITLE_CACHE_FILE = CACHE_DIR / cfg["Paths"].get("manual_episode_title_cache_file", "manual_episode_title_cache.json")
-
-# IMDb cache file
-IMDB_CACHE_FILE = CACHE_DIR / cfg["Paths"].get("imdb_cache_file", "imdb_cache.json")
-PLANNED_RENAMES_FILE = Path(cfg["Paths"].get("planned_renames_file", "planned_renames.json"))
-
-LOG_LEVEL = cfg["General"].get("log_level", "info").strip().lower()
-# SKIP_IMDB_IDS = cfg["General"].get("skip_imdb_ids", fallback='').split(',')
-# Convert to set for O(1) lookup performance
+DEBUG_MODE = cfg["General"].get("debug_mode", "false").strip().lower() == "true"
 SKIP_IMDB_IDS = {id.strip() for id in cfg["General"].get("skip_imdb_ids", "").split(",") if id.strip()}
 
 MEDIA_METADATA_FILE = CACHE_DIR / "media_metadata.json"
@@ -155,7 +196,7 @@ if not MEDIA_METADATA_FILE.exists():
     MEDIA_METADATA_FILE.write_text("{}", encoding="utf-8")
 
 def debug_print(*args, **kwargs):
-    if LOG_LEVEL == "debug":
+    if DEBUG_MODE:
         print(*args, **kwargs)
 
 
