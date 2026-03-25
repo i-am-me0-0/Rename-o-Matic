@@ -614,11 +614,29 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
             # If no year info, leave blank
 
     input_episode_nums = _episode_numbers(episode)
+    manual_slot_locked = False
 
     # Canonical episode info from metadata
     override_season, override_episode = season, episode
     episode_ids = _episode_id_list(ep_id)
     primary_ep_id = episode_ids[0] if episode_ids else None
+
+    # If this file/slot resolves via manual season remap, preserve local parsed numbering.
+    # Otherwise, canonical metadata may overwrite local episode indices and cause shifted labels.
+    try:
+        if imdb_id and season is not None and len(input_episode_nums) == 1 and primary_ep_id:
+            manual_episode_cache = load_manual_episode_cache()
+            mapped = (
+                manual_episode_cache
+                .get(str(imdb_id), {})
+                .get(str(season), {})
+                .get(str(input_episode_nums[0]))
+            )
+            if mapped and str(mapped) == str(primary_ep_id):
+                manual_slot_locked = True
+    except Exception:
+        manual_slot_locked = False
+
     ep_info = get_episode_info_by_id(primary_ep_id) if primary_ep_id else None
     from core.series_utils import get_episode_title_from_cache
     canonical_ep_title = get_episode_title_from_cache(primary_ep_id) if primary_ep_id else None
@@ -639,12 +657,12 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
             override_season = 0
             override_episode = 0
             is_movie_cut_special = True
-        if ep_info.get('season') is not None and len(input_episode_nums) <= 1:
+        if ep_info.get('season') is not None and len(input_episode_nums) <= 1 and not manual_slot_locked:
             try:
                 override_season = int(ep_info['season'])
             except Exception:
                 override_season = ep_info['season']
-        if ep_info.get('episode') is not None and len(input_episode_nums) <= 1:
+        if ep_info.get('episode') is not None and len(input_episode_nums) <= 1 and not manual_slot_locked:
             try:
                 override_episode = int(ep_info['episode'])
             except Exception:
