@@ -78,11 +78,58 @@ def extract_movie_info(filename):
             if not is_resolution and title:
                 return title, year, extras
     
+    # 4. Fallback: keep suspicious long numeric tokens (e.g. 20000) as extras
+    # when no valid movie year could be parsed.
+    normalized = filename.replace('.', ' ').replace('_', ' ').strip()
+    tokens = [t for t in normalized.split() if t]
+    if tokens:
+        title_tokens = []
+        extras_tokens = []
+        extras_started = False
+        for tok in tokens:
+            low = tok.lower()
+            if re.match(r'^tt\d{7,9}$', low):
+                # imdb id is handled elsewhere and should not become extras here
+                continue
+            if re.match(r'^\d{5,}$', tok):
+                extras_started = True
+                extras_tokens.append(tok)
+                continue
+            if extras_started:
+                extras_tokens.append(tok)
+            else:
+                title_tokens.append(tok)
+
+        if title_tokens and extras_tokens:
+            title = ' '.join(title_tokens).strip()
+            extras = clean_extras(' '.join(extras_tokens), keep_dots=False)
+            if title:
+                return title, None, extras
+
     return None, None, None
 
 
 def extract_episode_info(filename):
     fname = filename.lower()
+
+    # 0. Multi-episode patterns (e.g. S03E04E05, S03E04-E05)
+    multi_patterns = [
+        r"^(.*?)\s*[-_. ]*s(\d{1,2})e(\d{1,2})e(\d{1,2})[-_. ]*(.*)$",
+        # require a real separator and explicit second episode marker to avoid matching single E07 as E00-E07
+        r"^(.*?)\s*[-_. ]*s(\d{1,2})e(\d{1,2})\s*[-_. ]+e(\d{1,2})[-_. ]*(.*)$",
+    ]
+    for pattern in multi_patterns:
+        match = re.match(pattern, filename, re.I)
+        if match:
+            groups = match.groups()
+            raw_show = groups[0].strip().replace('.', ' ').replace('_', ' ')
+            show = apply_series_alias(raw_show)
+            season = int(groups[1]) if groups[1] and str(groups[1]).isdigit() else 1
+            ep1 = int(groups[2]) if groups[2] and str(groups[2]).isdigit() else None
+            ep2 = int(groups[3]) if groups[3] and str(groups[3]).isdigit() else None
+            extras = clean_extras(groups[4] if len(groups) > 4 and groups[4] else '', keep_dots=False)
+            if ep1 is not None and ep2 is not None:
+                return show, season, (ep1, ep2), extras
 
     # 1. Try to extract season/episode patterns first (always prefer explicit S/E)
     patterns = [

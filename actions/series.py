@@ -8,7 +8,7 @@ import re
 import json
 import os
 from core.file_utils import is_video_file
-from core.series_utils import clean_brackets, get_folder_imdb_id, get_episode_imdb_id_from_filename
+from core.series_utils import clean_brackets, get_folder_imdb_id
 from core.info_extractors import extract_episode_info
 from undo import log_rename
 from config import SERIES_DIR, LANG_CODES, debug_print, ui_debug_print 
@@ -71,6 +71,74 @@ def clean_brackets(text):
     cleaned = text.strip()
     if (cleaned.startswith("[") and cleaned.endswith("]")) or (cleaned.startswith("(") and cleaned.endswith(")")):
         cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+def _episode_numbers(episode):
+    if isinstance(episode, (list, tuple, set)):
+        out = []
+        for item in episode:
+            try:
+                out.append(int(item))
+            except Exception:
+                continue
+        return out
+    try:
+        if episode is None:
+            return []
+        return [int(episode)]
+    except Exception:
+        return []
+
+
+def _format_episode_label(season, episode):
+    nums = _episode_numbers(episode)
+    if season is None or not nums:
+        return "Special/Edge"
+    try:
+        s_num = int(season)
+        if len(nums) == 1:
+            return f"S{s_num:02}E{nums[0]:02}"
+        return f"S{s_num:02}E{nums[0]:02}" + "".join([f"-E{n:02}" for n in nums[1:]])
+    except Exception:
+        return "Special/Edge"
+
+
+def _episode_id_list(ep_id):
+    if not ep_id:
+        return []
+    if isinstance(ep_id, (list, tuple, set)):
+        return [str(x) for x in ep_id if x]
+    if isinstance(ep_id, str) and "|" in ep_id:
+        return [part.strip() for part in ep_id.split("|") if part.strip()]
+    return [str(ep_id)]
+
+
+def _has_skipped_episode_id(ep_id, name):
+    for eid in _episode_id_list(ep_id):
+        if is_imdb_id_skipped(eid, name):
+            return True
+    return False
+
+
+def _get_episode_ids_from_filename(file_stem):
+    try:
+        matches = re.findall(r"tt\d{7,9}", str(file_stem))
+    except Exception:
+        matches = []
+    if not matches:
+        return None
+    cleaned = []
+    seen = set()
+    for m in matches:
+        cid = clean_brackets(m)
+        if cid and cid not in seen:
+            cleaned.append(cid)
+            seen.add(cid)
+    if not cleaned:
+        return None
+    if len(cleaned) == 1:
+        return cleaned[0]
     return cleaned
 
 # --- Step 1: Get or prompt for show IMDb ID (never for episode filenames) ---
@@ -421,12 +489,22 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             show_id_map[(show, cache_key)] = imdb_id
             return imdb_id
 
-    debug_print(f"[DEBUG] Matched series metadata for {show} -> {imdb_id}")
-    show_id_map[(show, cache_key)] = imdb_id
-    return imdb_id
+    # debug_print(f"[DEBUG] Matched series metadata for {show} -> {imdb_id}")
+    # show_id_map[(show, cache_key)] = imdb_id
+    # return imdb_id
 
 # --- Step 2: Lookup episode IMDb ID (media_metadata is canonical) ---
 def lookup_episode_id(imdb_id, season, episode, file_stem=None):
+    episode_nums = _episode_numbers(episode)
+    if len(episode_nums) > 1:
+        resolved = []
+        for ep_num in episode_nums:
+            ep_id = lookup_episode_id(imdb_id, season, ep_num, file_stem=None)
+            if not ep_id:
+                return None
+            resolved.append(ep_id)
+        return resolved
+
     if file_stem:
         manual_title_cache = load_manual_episode_title_cache()
         ep_id = manual_title_cache.get(file_stem)
@@ -450,6 +528,35 @@ def lookup_episode_id(imdb_id, season, episode, file_stem=None):
 
 # --- Step 3: Get or prompt for episode IMDb ID (never pollute imdb_cache.json) ---
 def get_episode_imdb_id(show, imdb_id, season, episode, file_stem=None):
+    episode_nums = _episode_numbers(episode)
+    if len(episode_nums) > 1:
+        ep_ids = lookup_episode_id(imdb_id, season, episode, file_stem=None)
+        if ep_ids:
+            return ep_ids
+        if imdb_id:
+            fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
+        ep_ids = lookup_episode_id(imdb_id, season, episode, file_stem=None)
+        if ep_ids:
+            return ep_ids
+
+        collected = []
+        manual_episode_cache = load_manual_episode_cache()
+        for ep_num in episode_nums:
+            prompt_title = f"{show} {_format_episode_label(season, ep_num)}"
+            prompt_msg = f"Enter IMDb episode ID for: {prompt_title}"
+            ep_single = prompt_for_episode_id(prompt_title, prompt_msg)
+            if not ep_single:
+                return None
+            manual_episode_cache.setdefault(str(imdb_id), {}).setdefault(str(season), {})[str(ep_num)] = ep_single
+            collected.append(ep_single)
+        save_manual_episode_cache(manual_episode_cache)
+
+        if file_stem and collected:
+            manual_title_cache = load_manual_episode_title_cache()
+            manual_title_cache[file_stem] = "|".join(collected)
+            save_manual_episode_title_cache(manual_title_cache)
+        return collected
+
     ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file_stem)
     if ep_id:
         return ep_id
@@ -459,7 +566,7 @@ def get_episode_imdb_id(show, imdb_id, season, episode, file_stem=None):
     if ep_id:
         return ep_id
     if season is not None and episode is not None:
-        prompt_title = f"{show} S{season}E{episode}"
+        prompt_title = f"{show} {_format_episode_label(season, episode)}"
     else:
         prompt_title = f"{show} (Special/Edge)"
     prompt_msg = f"Enter IMDb episode ID for: {prompt_title}"
@@ -506,15 +613,21 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
                 years_str = f" ({start_year})"
             # If no year info, leave blank
 
+    input_episode_nums = _episode_numbers(episode)
+
     # Canonical episode info from metadata
     override_season, override_episode = season, episode
-    ep_info = get_episode_info_by_id(ep_id) if ep_id else None
+    episode_ids = _episode_id_list(ep_id)
+    primary_ep_id = episode_ids[0] if episode_ids else None
+    ep_info = get_episode_info_by_id(primary_ep_id) if primary_ep_id else None
     from core.series_utils import get_episode_title_from_cache
-    canonical_ep_title = get_episode_title_from_cache(ep_id) if ep_id else None
+    canonical_ep_title = get_episode_title_from_cache(primary_ep_id) if primary_ep_id else None
+    if len(input_episode_nums) > 1:
+        canonical_ep_title = None
     # Debug: if the episode title contains dots (e.g. acronyms like "L.A. Story")
     # or if this is the known problematic episode, log extras handling to help debug
     try:
-        if ep_id == 'tt34929210' or (isinstance(canonical_ep_title, str) and '.' in canonical_ep_title):
+        if (isinstance(canonical_ep_title, str) and '.' in canonical_ep_title): #or primary_ep_id == 'tt34929210':
             #debug_print(f"[DBG] build_episode_path: ep_id={ep_id} canonical_ep_title={repr(canonical_ep_title)} extras_in={repr(extras)}")
             pass
     except Exception:
@@ -526,12 +639,12 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
             override_season = 0
             override_episode = 0
             is_movie_cut_special = True
-        if ep_info.get('season') is not None:
+        if ep_info.get('season') is not None and len(input_episode_nums) <= 1:
             try:
                 override_season = int(ep_info['season'])
             except Exception:
                 override_season = ep_info['season']
-        if ep_info.get('episode') is not None:
+        if ep_info.get('episode') is not None and len(input_episode_nums) <= 1:
             try:
                 override_episode = int(ep_info['episode'])
             except Exception:
@@ -613,7 +726,7 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
             if not e_clean:
                 continue
             # Targeted debug for titles with dots or specific problematic ep_id
-            dbg_trace = (ep_id in ('tt34929210', 'tt9313942', 'tt5582700')) or ('.' in title_str)
+            dbg_trace = ('.' in title_str) #or (primary_ep_id in ('tt34929210', 'tt9313942', 'tt5582700'))  
             # Try substring match with normalized comparison
             extras_words = e_clean.split()
             match = None
@@ -694,12 +807,20 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
     if override_season is not None and override_episode is not None:
         try:
             s_num = int(override_season)
-            e_num = int(override_episode)
+            episode_nums = _episode_numbers(override_episode)
+            if not episode_nums:
+                episode_nums = _episode_numbers(episode)
             if s_num == 0:
                 season_folder = "Season 00"
             else:
                 season_folder = f"Season {s_num:02}"
-            episode_name = f"{series_title} - S{s_num:02}E{e_num:02}"
+            if len(episode_nums) > 1:
+                episode_code = f"S{s_num:02}E{episode_nums[0]:02}" + "".join([f"-E{n:02}" for n in episode_nums[1:]])
+            elif len(episode_nums) == 1:
+                episode_code = f"S{s_num:02}E{episode_nums[0]:02}"
+            else:
+                episode_code = "S00E00"
+            episode_name = f"{series_title} - {episode_code}"
         except Exception:
             # fallback if season/episode aren't integers
             season_folder = "Season 00"
@@ -715,9 +836,9 @@ def build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, orig
             episode_name += f" [{extras_str}]"
 
     # Always append episode IMDb ID
-    if ep_id:
-        cleaned_ep_id = clean_brackets(ep_id)
-        if cleaned_ep_id not in episode_name:
+    for eid in episode_ids:
+        cleaned_ep_id = clean_brackets(eid)
+        if cleaned_ep_id and cleaned_ep_id not in episode_name:
             episode_name += f" [{cleaned_ep_id}]"
 
     # Compose show folder name with years and IMDb ID
@@ -1018,10 +1139,8 @@ def plan_series_renames():
                 show, season, episode, extras = extract_episode_info(file.stem)
                 if not show:
                     continue
-                ep_imdb_id = get_episode_imdb_id_from_filename(file.stem)
-                if ep_imdb_id:
-                    ep_imdb_id = clean_brackets(ep_imdb_id)
-                if ep_imdb_id and is_imdb_id_skipped(ep_imdb_id, file.name):
+                ep_imdb_id = _get_episode_ids_from_filename(file.stem)
+                if ep_imdb_id and _has_skipped_episode_id(ep_imdb_id, file.name):
                     debug_print(f"🎬 Skipping episode (ID in skip list): {file.name} (ID: {ep_imdb_id})")
                     continue
                 imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
@@ -1029,7 +1148,7 @@ def plan_series_renames():
                     debug_print(f"⏭️ Skipped by user: {file.name}")
                     continue
                 ep_id = ep_imdb_id if ep_imdb_id else get_episode_imdb_id(show, imdb_id, season, episode, file_stem=file.stem)
-                if ep_id and is_imdb_id_skipped(ep_id, file.name):
+                if ep_id and _has_skipped_episode_id(ep_id, file.name):
                     debug_print(f"🎬 Skipping episode (ID in skip list): {file.name} (ID: {ep_id})")
                     continue
                 if folder_imdb_id and season and episode:
@@ -1037,7 +1156,8 @@ def plan_series_renames():
                     debug_print(f"  lookup_episode_id result: {ep_id}")
                     if ep_id:
                         debug_print(f"Adding missing episode ID to: {file.name}")
-                        new_stem = file.stem + f"[{ep_id}]"
+                        id_suffix = "".join([f"[{eid}]" for eid in _episode_id_list(ep_id)])
+                        new_stem = file.stem + id_suffix
                         new_path = file.parent / (new_stem + file.suffix)
                         shutil.move(str(file), str(new_path))
                         # Avoid planning a no-op (src == dest)
@@ -1070,8 +1190,8 @@ def plan_series_renames():
             show, season, episode, extras = extract_episode_info(file.stem)
             if not show:
                 continue
-            ep_imdb_id = get_episode_imdb_id_from_filename(file.stem)
-            if ep_imdb_id and is_imdb_id_skipped(ep_imdb_id, file.name):
+            ep_imdb_id = _get_episode_ids_from_filename(file.stem)
+            if ep_imdb_id and _has_skipped_episode_id(ep_imdb_id, file.name):
                 debug_print(f"🎬 Skipping episode (ID in skip list): {file.name} (ID: {ep_imdb_id})")
                 continue
             imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
@@ -1079,7 +1199,7 @@ def plan_series_renames():
                 debug_print(f"⏭️ Skipped by user: {file.name}")
                 continue
             ep_id = get_episode_imdb_id(show, imdb_id, season, episode)
-            if ep_id and is_imdb_id_skipped(ep_id, file.name):
+            if ep_id and _has_skipped_episode_id(ep_id, file.name):
                 debug_print(f"🎬 Skipping episode (ID in skip list): {file.name} (ID: {ep_id})")
                 continue
             fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
@@ -1144,10 +1264,11 @@ def organize_series(preview_only: bool, selected_files=None):
             imdb_id = get_or_prompt_show_imdb_id(show, file.parent.name, show_id_map)
 
             # Determine episode IMDb ID (could be embedded in filename or resolved via cache/prompts)
-            ep_imdb_id = get_episode_imdb_id_from_filename(file.stem)
-            if ep_imdb_id:
-                ep_imdb_id = clean_brackets(ep_imdb_id)
+            ep_imdb_id = _get_episode_ids_from_filename(file.stem)
             ep_id = ep_imdb_id if ep_imdb_id else get_episode_imdb_id(show, imdb_id, season, episode, file_stem=file.stem)
+            if ep_id and _has_skipped_episode_id(ep_id, file.name):
+                debug_print(f"🎬 Skipping episode (ID in skip list): {file.name} (ID: {ep_id})")
+                continue
 
             # Build destination path using canonical metadata
             dest_folder, dest_path = build_episode_path(file, show, season, episode, extras, imdb_id, ep_id, original_file_stem=file.stem)
@@ -1261,7 +1382,12 @@ def plan_series_renames_with_gui_prompts(root=None):
         for file, season, episode, extras in files:
             ep_id = None
             if file.stem in manual_title_cache:
-                ep_id = manual_title_cache[file.stem]
+                cached = manual_title_cache[file.stem]
+                cached_ids = _episode_id_list(cached)
+                if len(cached_ids) > 1:
+                    ep_id = cached_ids
+                else:
+                    ep_id = cached
             elif season is not None and episode is not None:
                 ep_id = lookup_episode_id(imdb_id, season, episode)
             if not ep_id:
@@ -1274,10 +1400,27 @@ def plan_series_renames_with_gui_prompts(root=None):
             def on_submit(epid_map):
                 manual_episode_cache = load_manual_episode_cache()
                 for idx, (file, season, episode, extras) in enumerate(missing_episodes):
-                    key = f"S{season or 'X'}E{episode or 'X'}: {file.name}"
+                    key = f"{_format_episode_label(season, episode)}: {file.name}"
                     ep_id = epid_map.get(key, "")
                     if ep_id and imdb_id:
-                        manual_episode_cache.setdefault(str(imdb_id), {}).setdefault(str(season), {})[str(episode)] = ep_id
+                        parsed_ids = []
+                        try:
+                            parsed_ids = re.findall(r"tt\d{7,9}", str(ep_id))
+                        except Exception:
+                            parsed_ids = []
+                        if not parsed_ids:
+                            parsed_ids = [str(ep_id)]
+
+                        episode_nums = _episode_numbers(episode)
+                        if len(episode_nums) > 1 and len(parsed_ids) > 1:
+                            for i, ep_num in enumerate(episode_nums):
+                                if i < len(parsed_ids):
+                                    manual_episode_cache.setdefault(str(imdb_id), {}).setdefault(str(season), {})[str(ep_num)] = parsed_ids[i]
+                        elif len(episode_nums) > 1 and len(parsed_ids) == 1:
+                            for ep_num in episode_nums:
+                                manual_episode_cache.setdefault(str(imdb_id), {}).setdefault(str(season), {})[str(ep_num)] = parsed_ids[0]
+                        else:
+                            manual_episode_cache.setdefault(str(imdb_id), {}).setdefault(str(season), {})[str(episode)] = parsed_ids[0]
                         save_manual_episode_cache(manual_episode_cache)
                     manual_title_cache = load_manual_episode_title_cache()
                     if file.stem and ep_id:
@@ -1290,7 +1433,7 @@ def plan_series_renames_with_gui_prompts(root=None):
                 except Exception:
                     pass
 
-            prompt_list = [f"S{season or 'X'}E{episode or 'X'}: {file.name}" for (file, season, episode, extras) in missing_episodes]
+            prompt_list = [f"{_format_episode_label(season, episode)}: {file.name}" for (file, season, episode, extras) in missing_episodes]
             # If running inside AppRoot (GUI mode), show a frame-based prompt and wait on a root-owned variable.
             if root is not None and hasattr(root, 'show_screen'):
                 try:
@@ -1328,7 +1471,12 @@ def plan_series_renames_with_gui_prompts(root=None):
         for file, season, episode, extras in files:
             ep_id = None
             if file.stem in manual_title_cache:
-                ep_id = manual_title_cache[file.stem]
+                cached = manual_title_cache[file.stem]
+                cached_ids = _episode_id_list(cached)
+                if len(cached_ids) > 1:
+                    ep_id = cached_ids
+                else:
+                    ep_id = cached
             elif season is not None and episode is not None:
                 ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file.stem)
             else:

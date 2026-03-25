@@ -295,7 +295,7 @@ def transform_omdb_poster_url(url: Optional[str]) -> Optional[str]:
         return None
     try:
         # If it already looks like a full-resolution URL, keep it
-        if 'FMjpg' in url or 'UX' in url or '_V1_FM' in url:
+        if 'FMjpg' in url or '_V1_UX' in url or '_V1_FM' in url:
             return url
 
         # Prefer amazon m.media-amazon.com images; otherwise return original
