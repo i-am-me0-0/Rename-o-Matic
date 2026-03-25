@@ -575,16 +575,18 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
     return fallback_id
 
 
-def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[int, Dict[int, str]]], save_episode_cache_func: Callable[[], None]) -> Dict[int, Dict[int, str]]:
+def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[int, Dict[int, str]]], save_episode_cache_func: Callable[[], None], force_refresh: bool = False) -> Dict[int, Dict[int, str]]:
     if series_imdb_id not in episode_cache:
         episode_cache[series_imdb_id] = {}
 
     all_episodes = episode_cache[series_imdb_id]
+    if force_refresh:
+        all_episodes.clear()
 
     # Try to use media_metadata cache first
     from core.media_metadata_cache import get_entry
     meta = get_entry(series_imdb_id)
-    if meta and 'episodes' in meta:
+    if (not force_refresh) and meta and 'episodes' in meta:
         # meta['episodes'] is a dict: {season: {episode: {imdb_id, ...}}}
         for season_str, eps in meta['episodes'].items():
             try:
@@ -616,7 +618,7 @@ def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[in
             break
         # If we already have all episodes for this season in all_episodes, skip OMDb request
         # We'll assume a season is complete if there is at least one episode for this season in all_episodes
-        if season in all_episodes and all_episodes[season]:
+        if (not force_refresh) and season in all_episodes and all_episodes[season]:
             continue
         params = {'apikey': OMDB_API_KEY, 'i': series_imdb_id, 'Season': season}
         try:
@@ -653,7 +655,9 @@ def fetch_episode_ids_omdb(series_imdb_id: str, episode_cache: Dict[str, Dict[in
             if max_season is not None and season_num > max_season:
                 # odd case: OMDb reports totalSeasons < season in response; stop
                 break
-            if season_num not in all_episodes:
+            if force_refresh:
+                all_episodes[season_num] = {}
+            elif season_num not in all_episodes:
                 all_episodes[season_num] = {}
 
             for ep in data['Episodes']:

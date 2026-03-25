@@ -40,6 +40,8 @@ class PreviewWindow(tk.Frame):
         btn_preview_cache.pack(pady=5)
         btn_omdb_scraper = tk.Button(right_column, text="OMDB Scraper", command=self.open_omdb_scraper)
         btn_omdb_scraper.pack(pady=5)
+        btn_season_remap = tk.Button(right_column, text="Season Episode Remap", command=self.open_season_episode_remap)
+        btn_season_remap.pack(pady=5)
         
         # Usage stats at bottom of right column
         self.usage_label = tk.Label(right_column, text="", font=("Arial", 9), fg="gray")
@@ -100,7 +102,7 @@ class PreviewWindow(tk.Frame):
             filter_type=None  # Show both movies and series
         )
         frame.pack(fill="both", expand=True, padx=10, pady=10)
-        win.geometry("650x530")
+        win.geometry("832x530")
 
     def open_omdb_scraper(self):
         """Open OMDB scraper window for manual metadata lookup."""
@@ -110,6 +112,15 @@ class PreviewWindow(tk.Frame):
         frame = OMDBScraperWindow(win)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
         win.geometry("700x500")
+
+    def open_season_episode_remap(self):
+        """Open season remap tool to correct OMDb season indexing into manual cache."""
+        from gui.season_episode_remap_window import SeasonEpisodeRemapWindow
+        win = tk.Toplevel(self)
+        win.title("Season Episode Remap")
+        frame = SeasonEpisodeRemapWindow(win)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        win.geometry("1200x760")
 
     def blank_planned_renames(self):
         import subprocess

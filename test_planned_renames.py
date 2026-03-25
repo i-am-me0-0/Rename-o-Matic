@@ -37,6 +37,7 @@ STATIC_SERIES = [
     "Meta Runner (2018–2022) [tt10695770]/Season 01/Meta Runner - S01E02 [Out of Bounds - Game Over 720p WEB-DL x265] [tt10756490].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 02/Meta Runner - S02E01 [Hard Reset - Restart - 1080p BluRay x264] [tt13292040].mkv",
     "Meta Runner (2018–2022) [tt10695770]/Season 02/Meta Runner - S02E02 [Firewall - 1080p BluRay x264] [tt13327702].mkv",
+    "The Office (2005–2013) [tt0386676]/Season 07/The Office - S07E11-E12 [Classy Christmas 720p BluRay x264] [tt1752584] [tt39301108].mkv",
     "Limitless (2015–2016) [tt4422836]/Season 01/Limitless - S01E01 [tt4927052].mkv",
     "Scorpion (2014–2018) [tt3514324]/Season 01/Scorpion - S01E07 [Father's Day 720p BluRay x264] [tt4089098].mkv",
     "Scorpion (2014–2018) [tt3514324]/Season 02/Scorpion - S02E18 [The Fast & the Nerdiest 720p WEB-DL x265] [tt5376432].mkv",

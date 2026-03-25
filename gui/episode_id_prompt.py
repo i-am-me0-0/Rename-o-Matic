@@ -129,6 +129,12 @@ class EpisodeIDPrompt(tk.Toplevel):
         label.pack(pady=5)
         label2 = tk.Label(self, text=f"An IMDb url is also accepted", font=("Arial", 10))
         label2.pack(pady=2)
+        label3 = tk.Label(
+            self,
+            text="Tip: For double-episode rows, use both fields (or paste both IMDb IDs/URLs in the first field).",
+            font=("Arial", 10)
+        )
+        label3.pack(pady=2)
         canvas = tk.Canvas(self)
         scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
         scroll_frame = tk.Frame(canvas)
@@ -139,6 +145,13 @@ class EpisodeIDPrompt(tk.Toplevel):
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+        def _is_double_episode_label(label_text: str) -> bool:
+            try:
+                return bool(re.search(r"\bS\d{1,2}E\d{1,2}(?:-E\d{1,2})+\b", label_text or "", flags=re.I))
+            except Exception:
+                return False
+
         for i, ep in enumerate(missing_episodes):
             row = tk.Frame(scroll_frame)
             row.pack(fill="x", pady=2)
@@ -147,12 +160,33 @@ class EpisodeIDPrompt(tk.Toplevel):
                 ep_label += f" | File: {file_names[i]}"
             lbl = tk.Label(row, text=ep_label, width=80, anchor="w")
             lbl.pack(side="left")
-            entry = tk.Entry(row, width=50)
-            entry.pack(side="left")
-            def autoscroll(event, e=entry):
-                e.xview_moveto(1)
-            entry.bind('<KeyRelease>', autoscroll)
-            self.entries[ep] = entry
+
+            if _is_double_episode_label(ep):
+                entry1 = tk.Entry(row, width=24)
+                entry1.pack(side="left", padx=(0, 4))
+                sep_lbl = tk.Label(row, text="|")
+                sep_lbl.pack(side="left", padx=2)
+                entry2 = tk.Entry(row, width=24)
+                entry2.pack(side="left", padx=(4, 0))
+
+                def autoscroll_dual_1(event, e=entry1):
+                    e.xview_moveto(1)
+
+                def autoscroll_dual_2(event, e=entry2):
+                    e.xview_moveto(1)
+
+                entry1.bind('<KeyRelease>', autoscroll_dual_1)
+                entry2.bind('<KeyRelease>', autoscroll_dual_2)
+                self.entries[ep] = (entry1, entry2)
+            else:
+                entry = tk.Entry(row, width=50)
+                entry.pack(side="left")
+
+                def autoscroll(event, e=entry):
+                    e.xview_moveto(1)
+
+                entry.bind('<KeyRelease>', autoscroll)
+                self.entries[ep] = entry
         btn_frame = tk.Frame(self)
         btn_frame.pack(pady=10)
         btn_submit = tk.Button(btn_frame, text="Submit", command=self.submit)
@@ -163,10 +197,34 @@ class EpisodeIDPrompt(tk.Toplevel):
 
     def submit(self):
         for ep, entry in self.entries.items():
-            imdb_id = entry.get().strip()
-            match = re.search(r'(tt\d{7,})', imdb_id)
-            imdb_id = match.group(1) if match else imdb_id
-            self.result[ep] = imdb_id
+            raw_value = ""
+            if isinstance(entry, tuple):
+                left = entry[0].get().strip() if entry[0] else ""
+                right = entry[1].get().strip() if entry[1] else ""
+                if left and right:
+                    raw_value = f"{left} | {right}"
+                else:
+                    raw_value = left or right
+            else:
+                raw_value = entry.get().strip()
+
+            matches = re.findall(r'(tt\d{7,})', raw_value)
+            if len(matches) > 1:
+                # Preserve both/all IDs so dual-episode handlers can map one per episode.
+                imdb_value = "|".join(matches)
+            elif len(matches) == 1:
+                imdb_value = matches[0]
+            else:
+                if isinstance(entry, tuple):
+                    left = entry[0].get().strip() if entry[0] else ""
+                    right = entry[1].get().strip() if entry[1] else ""
+                    if left and right:
+                        imdb_value = f"{left}|{right}"
+                    else:
+                        imdb_value = left or right
+                else:
+                    imdb_value = raw_value
+            self.result[ep] = imdb_value
         try:
             self.on_submit(self.result)
         except Exception:

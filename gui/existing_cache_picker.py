@@ -101,6 +101,7 @@ class ExistingCachePickerFrame(tk.Frame):
         btnf.pack(pady=8)
         tk.Button(btnf, text="Use Selected", width=14, command=self._use_selected).pack(side='left', padx=6)
         tk.Button(btnf, text="Refresh from OMDB", width=16, command=self._refresh_from_omdb).pack(side='left', padx=6)
+        tk.Button(btnf, text="Repair Series Episodes", width=18, command=self._repair_series_episodes).pack(side='left', padx=6)
         tk.Button(btnf, text="Enter ID Manually", width=16, command=self._prompt_manual).pack(side='left', padx=6)
         tk.Button(btnf, text="Rescrape New ID", width=16, command=self._rescrape).pack(side='left', padx=6)
         tk.Button(btnf, text="Use Original ID", width=16, command=self._use_original).pack(side='left', padx=6)
@@ -491,6 +492,33 @@ class ExistingCachePickerFrame(tk.Frame):
         except Exception:
             pass
 
+    def _get_selected_match(self):
+        sel = self.listbox.curselection()
+        if not sel:
+            return None, None
+        idx = sel[0]
+        selected_label = self.listbox.get(idx)
+        for lbl, m_id, m_meta in self.matches:
+            if lbl == selected_label:
+                return m_id, m_meta
+        return None, None
+
+    def _find_parent_series_id(self, episode_id: str):
+        try:
+            data = load_metadata()
+            for series_id, series_meta in data.items():
+                if str(series_meta.get('type', '')).lower() != 'series':
+                    continue
+                episodes = series_meta.get('episodes', {})
+                if not isinstance(episodes, dict):
+                    continue
+                for season_eps in episodes.values():
+                    if isinstance(season_eps, dict) and episode_id in season_eps.values():
+                        return series_id
+        except Exception:
+            pass
+        return None
+
     def _prompt_manual(self):
         # ask for manual imdb id in small dialog
         top = tk.Toplevel(self)
@@ -529,20 +557,7 @@ class ExistingCachePickerFrame(tk.Frame):
     
     def _refresh_from_omdb(self):
         """Refresh the selected entry's metadata from OMDB."""
-        sel = self.listbox.curselection()
-        if not sel:
-            return
-        idx = sel[0]
-        
-        # Get the actual label from the listbox
-        selected_label = self.listbox.get(idx)
-        
-        # Find the corresponding match by label
-        mid = None
-        for lbl, m_id, m_meta in self.matches:
-            if lbl == selected_label:
-                mid = m_id
-                break
+        mid, _ = self._get_selected_match()
         
         if not mid:
             return
@@ -566,6 +581,32 @@ class ExistingCachePickerFrame(tk.Frame):
             threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
             print(f"Error starting refresh: {e}")
+
+    def _repair_series_episodes(self):
+        """Explicitly refresh the full episode mapping for the selected series."""
+        mid, meta = self._get_selected_match()
+        if not mid:
+            return
+
+        selected_type = str((meta or {}).get('type', '')).lower()
+        series_id = mid if selected_type == 'series' else self._find_parent_series_id(mid)
+        if not series_id:
+            return
+
+        try:
+            from actions.omdb_gui_scraper import fetch_episode_ids_omdb
+            import threading
+
+            def worker():
+                try:
+                    fetch_episode_ids_omdb(series_id, {}, lambda: None, force_refresh=True)
+                    self.after(0, lambda: self._reload_and_reselect(series_id))
+                except Exception as e:
+                    print(f"Error repairing series episode cache for {series_id}: {e}")
+
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception as e:
+            print(f"Error starting series episode repair: {e}")
     
     def _reload_and_reselect(self, imdb_id):
         """Reload matches and reselect the given IMDb ID."""

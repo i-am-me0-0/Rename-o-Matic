@@ -105,7 +105,7 @@ def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None
 
                 top_cache = tk.Toplevel(root)
                 top_cache.title("Pick Existing Cache Entry")
-                top_cache.geometry("650x530+200+200")
+                top_cache.geometry("832x530+200+200")
                 frame = ExistingCachePickerFrame(top_cache, folder_name, conflicting_id or '', picker_callback)
                 frame.pack(fill='both', expand=True)
                 top_cache.transient(root)
