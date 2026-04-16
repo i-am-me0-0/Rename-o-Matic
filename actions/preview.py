@@ -5,6 +5,7 @@ from pathlib import Path
 from config import DEFAULT_INCLUDE, PLANNED_RENAMES_FILE
 import json
 import re
+import os
 
 # Windows forbidden chars: \/:*?"<>|
 def sanitize_path_component(component):
@@ -63,6 +64,45 @@ def validate_and_sanitize_path(path_str):
     return str(Path(*sanitized_parts))
 
 
+def _path_collision_key(path_obj: Path):
+    """Return a normalized, case-insensitive key for collision checks."""
+    try:
+        resolved = path_obj.resolve(strict=False)
+    except Exception:
+        resolved = path_obj
+    return os.path.normcase(os.path.normpath(str(resolved)))
+
+
+def _append_numbered_suffix(path_obj: Path, number: int):
+    if path_obj.suffix:
+        return path_obj.with_name(f"{path_obj.stem} ({number}){path_obj.suffix}")
+    return path_obj.with_name(f"{path_obj.name} ({number})")
+
+
+def ensure_unique_destination(src_path, desired_dest_path, reserved_dest_keys=None):
+    """Create a non-colliding destination path by appending numeric suffixes."""
+    if reserved_dest_keys is None:
+        reserved_dest_keys = set()
+
+    src = Path(src_path)
+    base_dest = Path(desired_dest_path)
+    src_key = _path_collision_key(src)
+
+    candidate = base_dest
+    suffix_number = 2
+    while True:
+        candidate_key = _path_collision_key(candidate)
+        same_as_src = candidate_key == src_key
+        collides_reserved = candidate_key in reserved_dest_keys
+        collides_existing = candidate.exists() and not same_as_src
+
+        if not collides_reserved and not collides_existing:
+            return candidate
+
+        candidate = _append_numbered_suffix(base_dest, suffix_number)
+        suffix_number += 1
+
+
 def generate_preview(root=None):
     import tkinter as tk
     from config import debug_print
@@ -102,6 +142,7 @@ def generate_preview(root=None):
 
     # Write as JSON array of objects
     json_entries = []
+    reserved_dest_keys = set()
     MAX_PATH = 260  # Windows max path length
     for idx, item in enumerate(planned):
         # Defensive: ensure item is a dict with expected keys
@@ -128,6 +169,10 @@ def generate_preview(root=None):
             sanitized_to = re.sub(r"\s{2,}", " ", sanitized_to)
         except Exception:
             pass
+        unique_dest = ensure_unique_destination(item["src"], sanitized_to, reserved_dest_keys)
+        if str(unique_dest) != str(sanitized_to):
+            debug_print(f"[WARN] generate_preview: destination collision for planned[{idx}] -> using unique path: {unique_dest}")
+        sanitized_to = str(unique_dest)
         # Defensive: skip entries where source and destination are the same
         try:
             from pathlib import Path as _P
@@ -146,6 +191,7 @@ def generate_preview(root=None):
         if len(sanitized_to) > MAX_PATH:
             print(f"❌ Skipping: Destination path too long ({len(sanitized_to)} chars): {sanitized_to}")
             continue
+        reserved_dest_keys.add(_path_collision_key(Path(sanitized_to)))
         json_entries.append({
             "include": int(DEFAULT_INCLUDE),
             "type": item["type"],
@@ -185,11 +231,20 @@ def execute_from_preview():
         except Exception as e:
             print(f"❌ Failed to read planned renames: {e}")
             return
+        reserved_dest_keys = set()
         for entry in planned:
             if int(entry.get("include", 0)) != 1:
                 continue
             src = Path(entry["from"])
+            if not src.exists():
+                print(f"⚠️ Source missing, skipping: {src}")
+                continue
             dest = Path(entry["to"])
+            unique_dest = ensure_unique_destination(src, dest, reserved_dest_keys)
+            if unique_dest != dest:
+                print(f"⚠️ Destination collision detected, using: {unique_dest}")
+            dest = unique_dest
+            reserved_dest_keys.add(_path_collision_key(dest))
             item_type = entry["type"].lower()
             print(f"\n🔁 Renaming: {src} → {dest}")
             if item_type.capitalize() == "Movie":

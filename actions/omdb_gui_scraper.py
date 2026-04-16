@@ -15,6 +15,7 @@ import threading
 from datetime import datetime, timedelta
 from core.media_metadata_cache import set_entry, update_entry, add_episode_to_series, get_entry
 from actions.custom_imdb_web_poster_scraper import fetch_poster_url_and_store, scrape_full_movie_metadata
+from core.info_extractors import extract_movie_info
 
 _root: Optional[tk.Tk] = None
 
@@ -269,6 +270,69 @@ def parse_title(title_line: str) -> Tuple[str, Optional[str]]:
     return line.strip().rstrip('-_. '), year
 
 
+def _extract_year_tokens(*parts: Any) -> List[str]:
+    """Extract unique 4-digit year tokens (1900-2099) from arbitrary text parts."""
+    text_chunks: List[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        try:
+            text_chunks.append(str(part))
+        except Exception:
+            continue
+    if not text_chunks:
+        return []
+    text = " ".join(text_chunks).replace('\u2013', ' ').replace('\u2014', ' ').replace('-', ' ')
+    tokens = re.findall(r"\d{4}", text)
+    out: List[str] = []
+    for t in tokens:
+        try:
+            year_num = int(t)
+            if 1900 <= year_num <= 2099 and t not in out:
+                out.append(t)
+        except Exception:
+            continue
+    return out
+
+
+def _extract_expected_movie_year(raw_line: str) -> Optional[str]:
+    """Best-effort extraction of movie year from the filename text."""
+    try:
+        stem = Path(raw_line).stem
+    except Exception:
+        stem = str(raw_line)
+    try:
+        _title, year, _extras = extract_movie_info(stem)
+        if year:
+            return str(year)
+    except Exception:
+        pass
+    return None
+
+
+def _movie_year_matches(expected_year: Optional[str], meta_year: Optional[str]) -> bool:
+    """Movie year compatibility: if we know expected year, it must match metadata year tokens."""
+    if not expected_year:
+        return True
+    if not meta_year:
+        return False
+    return str(expected_year) in _extract_year_tokens(meta_year)
+
+
+def _series_years_match(raw_line: str, meta: Dict[str, Any]) -> bool:
+    """Series year compatibility using the same token rules as series cache validation."""
+    folder_tokens = _extract_year_tokens(raw_line)
+    # If folder/key has no year data, keep legacy behavior and allow cache hit.
+    if not folder_tokens:
+        return True
+    meta_tokens = _extract_year_tokens(meta.get('year'), meta.get('end_year'))
+    if not meta_tokens:
+        return False
+    if len(folder_tokens) == 1 or len(meta_tokens) == 1:
+        return bool(set(folder_tokens) & set(meta_tokens))
+    return set(folder_tokens) == set(meta_tokens)
+
+
 def search_omdb(title: str) -> List[Dict[str, Any]]:
     params = {'apikey': OMDB_API_KEY, 's': title}
     global omdb_request_count
@@ -333,13 +397,19 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
 
     # Only prompt if the cache is missing or the title/year is missing or mismatched, unless force_prompt is True
     if cached_id and not force_prompt:
-        # Use metadata cache to check for title/year
+        # Use metadata cache to check for title/year and year compatibility with filename.
         meta = get_entry(cached_id)
+        expected_year = _extract_expected_movie_year(raw_line)
         if meta and meta.get('title') and meta.get('year'):
-            return cached_id
+            if _movie_year_matches(expected_year, meta.get('year')):
+                return cached_id
+            from config import ui_debug_print
+            ui_debug_print(
+                f"[DBG] get_imdb_id_gui: cached imdb id {cached_id} rejected for '{raw_line}' "
+                f"due to movie year mismatch (expected={expected_year}, meta_year={meta.get('year')})"
+            )
         else:
-            print(f"[INFO] Cached IMDb ID found") #but title/year may be incomplete. Re-prompting.
-            return
+            print(f"[INFO] Cached IMDb ID found")  # title/year incomplete -> prompt user.
 
     for attempt in range(max_retries):
         from config import ui_debug_print
@@ -445,16 +515,24 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
     search_title = search_title.strip().rstrip('-_. ') if search_title else search_title
     cached_id = imdb_cache.get(search_title)
     if cached_id:
-        # Use metadata cache to check for title/year
+        # Use metadata cache to check for title/year and compatibility with folder years.
         meta = get_entry(cached_id)
         if meta and meta.get('title') and meta.get('year'):
-            return cached_id
+            if _series_years_match(raw_line, meta):
+                return cached_id
+            from config import ui_debug_print
+            ui_debug_print(
+                f"[DBG] get_series_imdb_id_gui: cached imdb id {cached_id} rejected for '{raw_line}' "
+                f"due to series year mismatch (meta_year={meta.get('year')}, meta_end_year={meta.get('end_year')})"
+            )
         else:
             # Try to fetch and update
             data = fetch_title_and_year_from_imdb_id(cached_id)
             if data:
                 update_entry(cached_id, {'title': data[0], 'year': data[1]})
-                return cached_id
+                refreshed_meta = get_entry(cached_id)
+                if refreshed_meta and refreshed_meta.get('title') and refreshed_meta.get('year') and _series_years_match(raw_line, refreshed_meta):
+                    return cached_id
 
     for attempt in range(max_retries):
         from config import ui_debug_print
@@ -510,14 +588,15 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
                     debug_print(f"[ERROR] get_series_imdb_id_gui: error destroying picker early: {e}")
 
                 # Fetch and save title with years for metadata cache and populate episodes for newly-picked series.
+                data = None
                 try:
                     # Use safe_request so the UI shows a "Please wait" overlay while we populate episodes
-                    safe_request(fetch_title_and_year_from_imdb_id, imdb_id, True, False,
-                                 message=f"Fetching metadata and episodes for {imdb_id}...")
+                    data = safe_request(fetch_title_and_year_from_imdb_id, imdb_id, True, False,
+                                        message=f"Fetching metadata and episodes for {imdb_id}...")
                 except Exception:
                     # If the safe request fails, fall back to a best-effort synchronous fetch
                     try:
-                        fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=True, fetch_poster=False)
+                        data = fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=True, fetch_poster=False)
                     except Exception:
                         pass
                 # After populating episodes, attempt to fetch poster using the custom scraper (less frequently used file)
@@ -528,8 +607,8 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
                         fetch_poster_url_and_store(imdb_id)
                     except Exception:
                         pass
-                # fetch_title_and_year_from_imdb_id already updates the entry when possible; try to read returned title/year
-                data = fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=False, fetch_poster=False)
+                # Keep first metadata call result; avoid a duplicate OMDb i=<id> request here.
+                # data = fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=False, fetch_poster=False)
                 if data:
                     update_entry(imdb_id, {'title': data[0], 'year': data[1]})
                 result = imdb_id
@@ -553,12 +632,13 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
         imdb_cache[search_title] = fallback_id
         save_cache()
         # Try to fetch and save title with years and populate episodes for manual entry
+        data = None
         try:
-            safe_request(fetch_title_and_year_from_imdb_id, fallback_id, True, False,
-                         message=f"Fetching metadata and episodes for {fallback_id}...")
+            data = safe_request(fetch_title_and_year_from_imdb_id, fallback_id, True, False,
+                                message=f"Fetching metadata and episodes for {fallback_id}...")
         except Exception:
             try:
-                fetch_title_and_year_from_imdb_id(fallback_id, populate_episodes=True, fetch_poster=False)
+                data = fetch_title_and_year_from_imdb_id(fallback_id, populate_episodes=True, fetch_poster=False)
             except Exception:
                 pass
         # After populating episodes, also fetch poster via the custom scraper
@@ -569,7 +649,8 @@ def get_series_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Op
                 fetch_poster_url_and_store(fallback_id)
             except Exception:
                 pass
-        data = fetch_title_and_year_from_imdb_id(fallback_id, populate_episodes=False, fetch_poster=False)
+        # Keep first metadata call result; avoid a duplicate OMDb i=<id> request here.
+        # data = fetch_title_and_year_from_imdb_id(fallback_id, populate_episodes=False, fetch_poster=False)
         if data:
             update_entry(fallback_id, {'title': data[0], 'year': data[1]})
     return fallback_id

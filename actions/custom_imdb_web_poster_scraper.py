@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from typing import List, Optional 
 import os
 import re
+import json
 from pathlib import Path
 from config import MOVIES_DIR, SERIES_DIR, USER_AGENTS
 #, SCRAPE_MOVIE_POSTERS, SCRAPE_SERIES_THUMBNAILS, SCRAPE_SERIES_ROOT_FOLDERS
@@ -17,40 +18,147 @@ BASE_URL = "https://www.imdb.com/title/{imdb_id}/"
 session = requests.Session()
 
 
+def _normalize_poster_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    normalized = str(url).strip().replace('\\/', '/')
+    if normalized.startswith('//'):
+        normalized = 'https:' + normalized
+    if normalized.startswith('http://'):
+        normalized = 'https://' + normalized[len('http://'):]
+    return normalized if normalized.startswith('https://') else None
+
+
+def _extract_poster_url_from_html(html: str) -> Optional[str]:
+    if not html:
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Most reliable path when IMDb returns the canonical title page.
+    meta = soup.find("meta", property="og:image")
+    if meta and meta.get("content"):
+        return _normalize_poster_url(str(meta.get("content")))
+
+    twitter_meta = soup.find("meta", attrs={"name": "twitter:image"})
+    if twitter_meta and twitter_meta.get("content"):
+        return _normalize_poster_url(str(twitter_meta.get("content")))
+
+    for selector in (".ipc-media img", "img.ipc-image", "img[src*='m.media-amazon.com']"):
+        img = soup.select_one(selector)
+        if img and img.get("src"):
+            normalized = _normalize_poster_url(str(img.get("src")))
+            if normalized:
+                return normalized
+
+    # Fallback: parse JSON-LD blobs and embedded script text for image fields.
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = script.string or script.get_text() or ""
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+            nodes = payload if isinstance(payload, list) else [payload]
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                image_field = node.get("image") or node.get("thumbnailUrl")
+                if isinstance(image_field, str):
+                    normalized = _normalize_poster_url(image_field)
+                    if normalized:
+                        return normalized
+                elif isinstance(image_field, list):
+                    for image_item in image_field:
+                        normalized = _normalize_poster_url(str(image_item))
+                        if normalized:
+                            return normalized
+                elif isinstance(image_field, dict):
+                    normalized = _normalize_poster_url(
+                        image_field.get("url") or image_field.get("contentUrl")
+                    )
+                    if normalized:
+                        return normalized
+        except Exception:
+            pass
+
+        match = re.search(r'"(?:image|thumbnailUrl)"\s*:\s*"(https?://[^"\\]+)"', raw)
+        if match:
+            normalized = _normalize_poster_url(match.group(1))
+            if normalized:
+                return normalized
+
+    return None
+
+
+def _fetch_poster_from_suggestion_api(imdb_id: str) -> Optional[str]:
+    try:
+        first = imdb_id[0].lower() if imdb_id else "t"
+        suggestion_url = f"https://v3.sg.media-imdb.com/suggestion/{first}/{imdb_id}.json"
+        resp = requests.get(suggestion_url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        for item in payload.get("d", []):
+            if str(item.get("id", "")).lower() != imdb_id.lower():
+                continue
+            image_obj = item.get("i")
+            if isinstance(image_obj, dict):
+                poster_url = image_obj.get("imageUrl") or image_obj.get("url")
+                normalized = _normalize_poster_url(poster_url if isinstance(poster_url, str) else None)
+                if normalized:
+                    return normalized
+        return None
+    except Exception:
+        return None
+
+
 def fetch_poster_url(imdb_id: str) -> Optional[str]:
-    url = BASE_URL.format(imdb_id=imdb_id)
+    urls = [
+        BASE_URL.format(imdb_id=imdb_id),
+        BASE_URL.format(imdb_id=imdb_id) + "reference/",
+    ]
+    transient_statuses = {202, 429, 500, 502, 503, 504}
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept-Language": "en-US,en;q=0.9"
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Referer": "https://www.imdb.com/",
     }
+    last_status = None
+    last_exception = None
 
-    try:
-        response = session.get(url, headers=headers, timeout=10)
-        if response.status_code != 200:
-            print(f"[{imdb_id}] Failed with status {response.status_code}")
-            return None
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        meta = soup.find("meta", property="og:image")
-        if meta and meta.get("content"):
-            # bs4 may return an AttributeValue or AttributeValueList; coerce to str to satisfy static typing
+    for url in urls:
+        for attempt in range(1, 4):
             try:
-                val = meta.get("content")
-                return str(val) if val is not None else None
-            except Exception:
-                return None
+                response = session.get(url, headers=headers, timeout=10)
+                last_status = response.status_code
+                poster_url = _extract_poster_url_from_html(response.text)
+                if poster_url:
+                    return poster_url
 
-        img = soup.select_one(".ipc-media img")
-        if img and img.get("src"):
-            try:
-                src = img.get("src")
-                return str(src) if src is not None else None
-            except Exception:
-                return None
+                if response.status_code in transient_statuses and attempt < 3:
+                    # IMDb sometimes returns temporary responses (like 202); back off and retry.
+                    time.sleep((0.35 * attempt) + random.uniform(0.1, 0.4))
+                    continue
+                break
+            except Exception as e:
+                last_exception = e
+                if attempt < 3:
+                    time.sleep((0.35 * attempt) + random.uniform(0.1, 0.4))
+                    continue
+                break
 
-    except Exception as e:
-        print(f"[{imdb_id}] Error: {e}")
+    suggestion_poster = _fetch_poster_from_suggestion_api(imdb_id)
+    if suggestion_poster:
+        return suggestion_poster
+
+    if last_status is not None:
+        print(f"[{imdb_id}] Failed with status {last_status}")
+    elif last_exception is not None:
+        print(f"[{imdb_id}] Error: {last_exception}")
 
     return None
 

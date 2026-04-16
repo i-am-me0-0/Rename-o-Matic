@@ -23,6 +23,8 @@ class ExistingCachePickerFrame(tk.Frame):
         super().__init__(master)
         self.on_choice = on_choice
         self._poster_img = None
+        # Monotonic token used to ignore stale async poster callbacks.
+        self._poster_request_token = 0
         self.matches: List[Tuple[str, str, dict]] = []  # (label, imdb_id, meta)
         self.name = name
         self.conflicting_id = conflicting_id  # Store for later use
@@ -414,6 +416,10 @@ class ExistingCachePickerFrame(tk.Frame):
         
         # Update info text with metadata (pass mid for episode lookup)
         self._update_info_display(meta, mid if mid else None)
+
+        # Invalidate older in-flight poster loads whenever selection changes.
+        self._poster_request_token += 1
+        request_token = self._poster_request_token
         
         poster_url = meta.get('poster_url') if meta else None
         if poster_url and requests and Image:
@@ -442,25 +448,46 @@ class ExistingCachePickerFrame(tk.Frame):
                         
                         img_resized = img.resize((img_width, img_height), Image_mod.Resampling.LANCZOS)
                         def _set_img():
+                            if request_token != self._poster_request_token:
+                                return
+                            if not self.winfo_exists() or not self.img_label.winfo_exists():
+                                return
                             try:
-                                self._poster_img = ImageTk_mod.PhotoImage(img_resized)
+                                self._poster_img = ImageTk_mod.PhotoImage(img_resized, master=self.img_label)
                                 # Don't change label size, just update image
                                 self.img_label.configure(image=self._poster_img, text='')
-                            except Exception as e:
-                                print(f"Error setting image: {e}")
-                        self.after(0, _set_img)
+                            except tk.TclError:
+                                # Window/widget likely destroyed while async load completed.
+                                return
+                            except Exception:
+                                return
+                        try:
+                            self.after(0, _set_img)
+                        except tk.TclError:
+                            return
                 except Exception as e:
                     # If image loading fails, show no image
                     print(f"Error loading poster from {poster_url}: {e}")
                     def _set_no_img():
+                        if request_token != self._poster_request_token:
+                            return
+                        if not self.winfo_exists() or not self.img_label.winfo_exists():
+                            return
                         try:
                             self.img_label.configure(text='[No Image]', image='')
                         except Exception:
                             pass
-                    self.after(0, _set_no_img)
+                    try:
+                        self.after(0, _set_no_img)
+                    except tk.TclError:
+                        return
             threading.Thread(target=_dl, daemon=True).start()
         else:
-            self.img_label.configure(text='[No Image]', image='')
+            try:
+                if self.winfo_exists() and self.img_label.winfo_exists():
+                    self.img_label.configure(text='[No Image]', image='')
+            except Exception:
+                pass
 
     def _use_selected(self):
         sel = self.listbox.curselection()
