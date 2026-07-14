@@ -53,6 +53,9 @@ STATIC_SERIES = [
     "Friends (1994–2004) [tt0108778]/Season 02/Friends - S02E02 [The One with the Breast Milk 1900] [tt0583583].mkv",
     "Friends (1994–2004) [tt0108778]/Season 01/Friends - S01E01 [The One Where Monica Gets a Roommate - 720p] [tt0583459].mkv",
     "Friends (1994–2004) [tt0108778]/Season 01/Friends - S01E02 [The One with the Sonogram at the End - The One with the Sonogram 1900] [tt0583647].mkv",
+    "Dexter (2006–2013) [tt0773262]/Season 01/Dexter - S05E07 [Circle Us - 720p bluray x265 10bit] [tt1721224].mkv",
+    "Dexter (2006–2013) [tt0773262]/Season 01/Dexter - S01E07 [Circle of Friends - 720p bluray x265 10bit] [tt0859272].mkv",
+    "MacGyver (1985–1992) [tt0088559]/Season 01/MacGyver - S01E01 [Pilot - old series] [tt0165375].mkv",
 ]
 
 # If True, print detailed per-item matches. If False, print only the concise

@@ -265,28 +265,48 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             ui_debug_print(f"[DBG] After population: cached_meta for {cached_imdb_id} = {('present' if cached_meta else 'MISSING')}")
         except Exception as e:
             debug_print(f"[WARN] Failed to populate metadata for {cached_imdb_id}: {e}")
-        # If this turned out to be a series, try to populate episode map too.
-        # Keep a generous safety cap to avoid hammering OMDb for extremely large series.
-        try:
-            if cached_meta and cached_meta.get('type') == 'series' and not cached_meta.get('episodes'):
-                ts = cached_meta.get('totalSeasons')
+
+    if cached_meta and cached_meta.get('type') and cached_meta.get('type') != 'series':
+        reason = (
+            f"Cached IMDb ID {cached_imdb_id} is type={cached_meta.get('type')}, not series. "
+            f"Pick the correct series IMDb ID for this folder or skip."
+        )
+        manual_id = prompt_for_imdb_id_conflict(folder_name, cached_imdb_id, reason)
+        ui_debug_print(f"[DBG] type conflict prompt returned: {manual_id} for {cache_key}")
+        if manual_id is None:
+            debug_print(f"⏭️ Skipped by user: {cache_key}")
+            return None
+        if isinstance(manual_id, tuple):
+            cached_imdb_id, force_override = manual_id
+        else:
+            cached_imdb_id = manual_id
+            force_override = False
+        cached_meta = get_entry(cached_imdb_id) if cached_imdb_id else None
+        if not cached_meta:
+            return None
+
+    # If this turned out to be a series, try to populate episode map too.
+    # Keep a generous safety cap to avoid hammering OMDb for extremely large series.
+    try:
+        if cached_meta and cached_meta.get('type') == 'series' and not cached_meta.get('episodes'):
+            ts = cached_meta.get('totalSeasons')
+            try:
+                tsn = int(ts) if ts is not None else None
+            except Exception:
+                tsn = None
+            # If totalSeasons unknown or reasonably small, populate episodes now
+            if isinstance(cached_imdb_id, str) and (tsn is None or tsn <= 50):
+                debug_print(f"[DEBUG] Populating episode map for series {cached_imdb_id} (totalSeasons={ts})")
                 try:
-                    tsn = int(ts) if ts is not None else None
-                except Exception:
-                    tsn = None
-                # If totalSeasons unknown or reasonably small, populate episodes now
-                if tsn is None or tsn <= 50:
-                    debug_print(f"[DEBUG] Populating episode map for series {cached_imdb_id} (totalSeasons={ts})")
-                    try:
-                        # fetch_episode_ids_omdb will add episodes into media cache via add_episode_to_series
-                        fetch_episode_ids_omdb(cached_imdb_id, {}, lambda: None)
-                        cached_meta = get_entry(cached_imdb_id)
-                    except Exception as e:
-                        debug_print(f"[WARN] Failed to populate episode ids for {cached_imdb_id}: {e}")
-                else:
-                    debug_print(f"[INFO] Skipping episode population for {cached_imdb_id}: totalSeasons={tsn} exceeds safety threshold")
-        except Exception:
-            pass
+                    # fetch_episode_ids_omdb will add episodes into media cache via add_episode_to_series
+                    fetch_episode_ids_omdb(cached_imdb_id, {}, lambda: None)
+                    cached_meta = get_entry(cached_imdb_id)
+                except Exception as e:
+                    debug_print(f"[WARN] Failed to populate episode ids for {cached_imdb_id}: {e}")
+            else:
+                debug_print(f"[INFO] Skipping episode population for {cached_imdb_id}: totalSeasons={tsn} exceeds safety threshold")
+    except Exception:
+        pass
 
 
     # If we have a cached imdb id from imdb_cache, validate its years against folder_name
@@ -385,7 +405,24 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
     if folder_imdb_id:
         meta = get_entry(folder_imdb_id)
         title_val = meta.get('title') if meta else None
-        if title_val and title_val.strip().lower() == str(show).strip().lower():
+        if meta and meta.get('type') != 'series':
+            reason = (
+                f"Folder IMDb ID {folder_imdb_id} is type={meta.get('type')}, not series. "
+                f"Pick the correct series IMDb ID for this folder or skip."
+            )
+            manual_id = prompt_for_imdb_id_conflict(folder_name, folder_imdb_id, reason)
+            ui_debug_print(f"[DBG] folder type conflict prompt returned: {manual_id} for {cache_key}")
+            if manual_id is None:
+                debug_print(f"⏭️ Skipped by user: {cache_key}")
+                return None
+            if isinstance(manual_id, tuple):
+                folder_imdb_id, _force_override = manual_id
+            else:
+                folder_imdb_id = manual_id
+            meta = get_entry(folder_imdb_id) if folder_imdb_id else None
+            if not meta:
+                return None
+        elif title_val and title_val.strip().lower() == str(show).strip().lower():
             debug_print(f"[IMDB] Using IMDb ID from folder name: {folder_imdb_id} (title matches '{show}')")
             imdb_cache[cache_key] = folder_imdb_id
             try:
@@ -408,6 +445,24 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             return None
 
         meta = get_entry(imdb_id) if imdb_id else None
+        if meta and meta.get('type') and meta.get('type') != 'series':
+            reason = (
+                f"Selected IMDb ID {imdb_id} is type={meta.get('type')}, not series. "
+                f"Pick the correct series IMDb ID for this folder or skip."
+            )
+            manual_id = prompt_for_imdb_id_conflict(folder_name, imdb_id, reason)
+            ui_debug_print(f"[DBG] selected type conflict prompt returned: {manual_id} for {cache_key}")
+            if manual_id is None:
+                debug_print(f"⏭️ Skipped by user: {cache_key}")
+                return None
+            if isinstance(manual_id, tuple):
+                imdb_id, force_override = manual_id
+            else:
+                imdb_id = manual_id
+                force_override = False
+            meta = get_entry(imdb_id) if imdb_id else None
+            if not meta:
+                continue
         # If this is a newly-picked series (no metadata or no episodes), try to populate metadata and episodes now.
         if not meta or not meta.get('episodes'):
             try:
@@ -415,11 +470,13 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
                 from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id, safe_request
                 ui_debug_print(f"[DBG] get_or_prompt_show_imdb_id: fetching title/year for newly-picked imdb_id={imdb_id} (populate_episodes=True)")
                 try:
-                    safe_request(fetch_title_and_year_from_imdb_id, imdb_id, True, False,
-                                 message=f"Fetching metadata and episodes for {imdb_id}...")
+                    if isinstance(imdb_id, str):
+                        safe_request(fetch_title_and_year_from_imdb_id, imdb_id, True, False,
+                                     message=f"Fetching metadata and episodes for {imdb_id}...")
                 except Exception:
                     # fallback to direct call if safe_request misbehaves
-                    fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=True, fetch_poster=False)
+                    if isinstance(imdb_id, str):
+                        fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=True, fetch_poster=False)
             except Exception:
                 # best-effort only; if this fails we'll fall back to the missing-episodes prompt later
                 pass

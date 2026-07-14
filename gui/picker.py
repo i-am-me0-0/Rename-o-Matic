@@ -47,6 +47,7 @@ class Picker(tk.Frame):
         # Keep a reference to the entry so we can focus it when needed.
         self.search_entry = tk.Entry(top_frame, textvariable=self.search_term, width=40)
         self.search_entry.pack(side='left', padx=(0, 5))
+        self.search_entry.bind("<Return>", lambda event: self.manual_search())
         tk.Button(top_frame, text="Search Again", command=self.manual_search).pack(side='left')
         tk.Button(top_frame, text="Confirm Selection", command=self.confirm).pack(side='right')
         tk.Button(top_frame, text="Skip", fg="blue", command=self.skip).pack(side='right', padx=(5, 0))

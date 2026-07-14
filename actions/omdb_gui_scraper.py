@@ -801,116 +801,119 @@ def fetch_title_and_year_from_imdb_id(imdb_id: str, populate_episodes: bool = Fa
         print(f"[OMDb] Request #{omdb_request_count}: {OMDB_BASE_URL} params={params}")
         resp = requests.get(OMDB_BASE_URL, params=params, timeout=10)
         data = resp.json()
-        if data.get('Response') == 'True':
-            title = data.get('Title')
-            year = data.get('Year')
-            plot = data.get('Plot')
-            type_ = data.get('Type')
-            ts = data.get('totalSeasons')
-            released = data.get('Released')
+        if data.get('Response') != 'True':
+            debug_print(f"[OMDb] No data for {imdb_id}: {data.get('Error', 'Response=False')}")
+            return None
 
-            # Merge/update logic: only add missing title/year/type or update when OMDb provides richer info
-            try:
-                existing = get_entry(imdb_id) or {}
-            except Exception:
-                existing = {}
+        title = data.get('Title')
+        year = data.get('Year')
+        plot = data.get('Plot')
+        type_ = data.get('Type')
+        ts = data.get('totalSeasons')
+        released = data.get('Released')
 
-            updates: Dict[str, Any] = {}
+        # Merge/update logic: only add missing title/year/type or update when OMDb provides richer info
+        try:
+            existing = get_entry(imdb_id) or {}
+        except Exception:
+            existing = {}
 
-            # Title: add if missing
-            if title and not existing.get('title'):
-                updates['title'] = title
+        updates: Dict[str, Any] = {}
 
-            # Year: add if missing, or replace if OMDb provides a range while cache has single year
-            existing_year = existing.get('year')
-            if year and not existing_year:
+        # Title: add if missing
+        if title and not existing.get('title'):
+            updates['title'] = title
+
+        # Year: add if missing, or replace if OMDb provides a range while cache has single year
+        existing_year = existing.get('year')
+        if year and not existing_year:
+            updates['year'] = year
+        elif year and existing_year:
+            # Normalize check for range char
+            def is_range(s: str) -> bool:
+                return (isinstance(s, str) and ('–' in s or '-' in s))
+            if is_range(year) and not is_range(existing_year):
                 updates['year'] = year
-            elif year and existing_year:
-                # Normalize check for range char
-                def is_range(s: str) -> bool:
-                    return (isinstance(s, str) and ('–' in s or '-' in s))
-                if is_range(year) and not is_range(existing_year):
-                    updates['year'] = year
-                # otherwise prefer existing range over single-year OMDb responses
+            # otherwise prefer existing range over single-year OMDb responses
 
-            # totalSeasons: persist if present
-            if ts:
-                try:
-                    updates['totalSeasons'] = int(ts)
-                except Exception:
-                    updates['totalSeasons'] = ts
+        # totalSeasons: persist if present
+        if ts:
+            try:
+                updates['totalSeasons'] = int(ts)
+            except Exception:
+                updates['totalSeasons'] = ts
 
-            # Type: prefer existing series if episodes already present; otherwise set from OMDb
-            if existing.get('episodes'):
-                # keep existing type (likely 'series') and do not overwrite with 'movie'
+        # Type: prefer existing series if episodes already present; otherwise set from OMDb
+        if existing.get('episodes'):
+            # keep existing type (likely 'series') and do not overwrite with 'movie'
+            pass
+        else:
+            if type_:
+                updates['type'] = type_
+
+        # Released: add if missing (important for episodes)
+        if released and not existing.get('released'):
+            updates['released'] = released
+
+        # Summary: add if missing
+        if plot and not existing.get('summary'):
+            updates['summary'] = plot
+
+        if updates:
+            try:
+                update_entry(imdb_id, updates)
+            except Exception:
                 pass
-            else:
-                if type_:
-                    updates['type'] = type_
 
-            # Released: add if missing (important for episodes)
-            if released and not existing.get('released'):
-                updates['released'] = released
-
-            # Summary: add if missing
-            if plot and not existing.get('summary'):
-                updates['summary'] = plot
-
-            if updates:
-                try:
-                    update_entry(imdb_id, updates)
-                except Exception:
-                    pass
-
-            # Optionally fetch poster (prefer OMDb Poster when available)
-            if fetch_poster:
-                try:
-                    poster_field = data.get('Poster') if isinstance(data, dict) else None
-                    if poster_field and poster_field not in ('N/A', ''):
+        # Optionally fetch poster (prefer OMDb Poster when available)
+        if fetch_poster:
+            try:
+                poster_field = data.get('Poster') if isinstance(data, dict) else None
+                if poster_field and poster_field not in ('N/A', ''):
+                    try:
+                        transformed = transform_omdb_poster_url(poster_field)
+                        if transformed:
+                            update_entry(imdb_id, {'poster_url': transformed})
+                    except Exception:
+                        # If transforming or updating fails, fallback to scraper
                         try:
-                            transformed = transform_omdb_poster_url(poster_field)
-                            if transformed:
-                                update_entry(imdb_id, {'poster_url': transformed})
-                        except Exception:
-                            # If transforming or updating fails, fallback to scraper
-                            try:
-                                fetch_poster_url_and_store(imdb_id)
-                            except Exception:
-                                pass
-                    else:
-                        # No OMDb poster available; fallback to IMDb scraper
-                        try:
-                            debug_print("[imdb-fallback] scraping poster from imdb")
                             fetch_poster_url_and_store(imdb_id)
                         except Exception:
                             pass
-                except Exception:
-                    pass
-
-            # Optionally populate episodes (may make multiple OMDb season requests)
-            if populate_episodes and type_ == 'series':
-                try:
+                else:
+                    # No OMDb poster available; fallback to IMDb scraper
                     try:
-                        tsn = int(ts) if ts is not None else None
-                    except Exception:
-                        tsn = None
-                    if tsn is None or tsn <= 50:
-                        fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
-                except Exception:
-                    pass
-
-            # Ensure that if we have an episodes map, the stored type is 'series'
-            try:
-                post_meta = get_entry(imdb_id) or {}
-                if post_meta.get('episodes') and post_meta.get('type') != 'series':
-                    try:
-                        update_entry(imdb_id, {'type': 'series'})
+                        debug_print("[imdb-fallback] scraping poster from imdb")
+                        fetch_poster_url_and_store(imdb_id)
                     except Exception:
                         pass
             except Exception:
                 pass
 
-            return title, year
+        # Optionally populate episodes (may make multiple OMDb season requests)
+        if populate_episodes and type_ == 'series':
+            try:
+                try:
+                    tsn = int(ts) if ts is not None else None
+                except Exception:
+                    tsn = None
+                if tsn is None or tsn <= 50:
+                    fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
+            except Exception:
+                pass
+
+        # Ensure that if we have an episodes map, the stored type is 'series'
+        try:
+            post_meta = get_entry(imdb_id) or {}
+            if post_meta.get('episodes') and post_meta.get('type') != 'series':
+                try:
+                    update_entry(imdb_id, {'type': 'series'})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return title, year
     except Exception as e:
         print(f"❌ Failed to fetch title/year for {imdb_id}: {e}")
     return None
