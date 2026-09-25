@@ -333,8 +333,10 @@ def _series_years_match(raw_line: str, meta: Dict[str, Any]) -> bool:
     return set(folder_tokens) == set(meta_tokens)
 
 
-def search_omdb(title: str) -> List[Dict[str, Any]]:
+def search_omdb(title: str, year: Optional[str] = None) -> List[Dict[str, Any]]:
     params = {'apikey': OMDB_API_KEY, 's': title}
+    if year:
+        params['y'] = year
     global omdb_request_count
     try:
         omdb_request_count += 1
@@ -456,15 +458,27 @@ def get_imdb_id_gui(raw_line: str, max_retries: int = 3, search_title: Optional[
                 debug_print(f"[ERROR] get_imdb_id_gui: error destroying picker early: {e}")
 
             # If the user entered a manual IMDb ID (search term starting with 'tt'),
-            # perform the full scrape safely (off the immediate callback) so we
-            # populate the metadata cache without blocking the GUI.
+            # fetch metadata immediately so the current run can use it, not just cache
+            # the id for a later run.
             if picker.search_term.get().strip().lower().startswith("tt"):
                 try:
-                    ui_debug_print(f"[DBG] get_imdb_id_gui: calling scrape_full_movie_metadata for {imdb_id} via safe_request")
-                    safe_request(scrape_full_movie_metadata, imdb_id, message=f"Scraping IMDb for {imdb_id}...")
+                    ui_debug_print(f"[DBG] get_imdb_id_gui: fetching OMDb metadata for manual IMDb ID {imdb_id}")
+                    data = safe_request(
+                        fetch_title_and_year_from_imdb_id,
+                        imdb_id,
+                        message=f"Fetching metadata for {imdb_id}...",
+                        populate_episodes=False,
+                        fetch_poster=True,
+                    )
+                    if data:
+                        title_str, year_str = data
+                        update_entry(imdb_id, {'title': title_str, 'year': year_str})
                 except Exception:
-                    # If scraping fails, continue without blocking the selection flow
-                    pass
+                    # If OMDb metadata fetch fails, fall back to the HTML scraper.
+                    try:
+                        safe_request(scrape_full_movie_metadata, imdb_id, message=f"Scraping IMDb for {imdb_id}...")
+                    except Exception:
+                        pass
             else:
                 # For regular selections fetched from OMDb, try to get title/year
                 ui_debug_print(f"[DBG] get_imdb_id_gui: fetching title/year for {imdb_id}")

@@ -1,7 +1,6 @@
 import tkinter as tk
 import re
 from typing import Any, Dict, List, Optional
-from actions.custom_imdb_web_poster_scraper import scrape_full_movie_metadata
 from actions.omdb_gui_scraper import safe_download_image, safe_request, search_omdb, get_root, SEARCH_LIMIT
 from config import ui_debug_print
 
@@ -15,6 +14,7 @@ class Picker(tk.Frame):
         # Use the app root for variable ownership to ensure wait_variable works
         root = get_root()
         self.search_term = tk.StringVar(root, value=search_title)
+        self.search_year = tk.StringVar(root, value="")
         self.results = results[:SEARCH_LIMIT]
         self.original_line = original_line
         # source indicates caller type: e.g. 'movie' or 'series'
@@ -48,6 +48,12 @@ class Picker(tk.Frame):
         self.search_entry = tk.Entry(top_frame, textvariable=self.search_term, width=40)
         self.search_entry.pack(side='left', padx=(0, 5))
         self.search_entry.bind("<Return>", lambda event: self.manual_search())
+
+        self.year_entry = tk.Label(top_frame, text="Year:")
+        self.year_entry = tk.Entry(top_frame, textvariable=self.search_year, width=6)
+        self.year_entry.pack(side='left', padx=(0, 5))
+        self.year_entry.bind("<Return>", lambda event: self.manual_search())
+
         tk.Button(top_frame, text="Search Again", command=self.manual_search).pack(side='left')
         tk.Button(top_frame, text="Confirm Selection", command=self.confirm).pack(side='right')
         tk.Button(top_frame, text="Skip", fg="blue", command=self.skip).pack(side='right', padx=(5, 0))
@@ -136,8 +142,15 @@ class Picker(tk.Frame):
         query = self.search_term.get().strip()
         if not query:
             return
-        ui_debug_print(f"[DBG] Picker.manual_search: query='{query}'")
-        self.results = safe_request(search_omdb, query, message=f"Searching for '{query}'...")
+        year = self.search_year.get().strip()
+        if year and not re.match(r"^\d{4}$", year):
+            year = None  # ignore garbage input rather than error out
+        ui_debug_print(f"[DBG] Picker.manual_search: query='{query}' year='{year}'")
+        if re.match(r"tt\d{7,}", query, re.I):
+            self.results = []
+            self.show_results(self.results)
+            return
+        self.results = safe_request(search_omdb, query, year, message=f"Searching for '{query}'" + (f" ({year})" if year else "") + "...")
         ui_debug_print(f"[DBG] Picker.manual_search: got {len(self.results) if self.results else 0} results")
         self.show_results(self.results)
 

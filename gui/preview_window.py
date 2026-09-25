@@ -23,6 +23,8 @@ class PreviewWindow(tk.Frame):
         btn_generate.pack(pady=5)
         btn_blank_slate = tk.Button(left_column, text="Create Blank Slate", command=self.blank_planned_renames)
         btn_blank_slate.pack(pady=5)
+        btn_blank_slate = tk.Button(left_column, text="Manual TVDB Scraper", command=self.manual_series_tvdb_scraper)
+        btn_blank_slate.pack(pady=5)
         btn_view_planned = tk.Button(left_column, text="View/Edit Planned Renames", command=self.open_planned_renames)
         btn_view_planned.pack(pady=5)
         btn_batch_edit = tk.Button(left_column, text="Batch Edit Planned Renames", command=self.open_batch_edit)
@@ -133,6 +135,20 @@ class PreviewWindow(tk.Frame):
         main()
         # After completion, open batch edit window
         self.open_batch_edit()
+
+    def manual_series_tvdb_scraper(self):
+        import subprocess
+        import sys
+        import os
+        # Run manual_series_mode.py to generate blank planned renames
+        # script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "manual_series_mode.py")
+        # subprocess.run([sys.executable, script_path])
+        from actions.manual_series_tvdb_scraper import main
+        main()
+        # After completion, open batch edit window
+        self.open_batch_edit()
+
+        
 
     def do_generate(self):
         debug_print("[DEBUG] PreviewWindow.do_generate: started")

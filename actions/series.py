@@ -1184,8 +1184,8 @@ def plan_series_renames():
     for file in SERIES_DIR.rglob("*"):
         if not (file.is_file() and is_video_file(file)):
             continue
-        show, season, episode, extras = extract_episode_info(file.stem)
         folder_name = get_series_folder_name(file)
+        show, season, episode, extras = extract_episode_info(file.stem, folder_name=folder_name)
         group_key = get_canonical_group_key(show, folder_name)
         series_files.setdefault(group_key, []).append(file)
 
@@ -1193,8 +1193,8 @@ def plan_series_renames():
     def process_group(group_key, files):
         debug_print(f"Processing group: {group_key}")
         first_file = files[0]
-        show, season, episode, extras = extract_episode_info(first_file.stem)
         folder_name = get_series_folder_name(first_file)
+        show, season, episode, extras = extract_episode_info(first_file.stem, folder_name=folder_name)
         imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
         folder_imdb_id = get_folder_imdb_id(folder_name)
 
@@ -1211,7 +1211,7 @@ def plan_series_renames():
                     fetch_episode_ids_omdb(folder_imdb_id, {}, lambda: None)
             for file in files:
                 debug_print(f"  Processing file: {file.name}")
-                show, season, episode, extras = extract_episode_info(file.stem)
+                show, season, episode, extras = extract_episode_info(file.stem, folder_name=folder_name)
                 if not show:
                     continue
                 ep_imdb_id = _get_episode_ids_from_filename(file.stem)
@@ -1262,7 +1262,7 @@ def plan_series_renames():
         # Regular processing for files not in skip list
         for file in files:
             debug_print(f"  Processing file: {file.name}")
-            show, season, episode, extras = extract_episode_info(file.stem)
+            show, season, episode, extras = extract_episode_info(file.stem, folder_name=folder_name)
             if not show:
                 continue
             ep_imdb_id = _get_episode_ids_from_filename(file.stem)
@@ -1330,13 +1330,14 @@ def organize_series(preview_only: bool, selected_files=None):
                 continue
 
             # Extract episode components from the filename
-            show, season, episode, extras = extract_episode_info(file.stem)
+            folder_name = get_series_folder_name(file)
+            show, season, episode, extras = extract_episode_info(file.stem, folder_name=folder_name)
             if not show:
                 debug_print(f"❌ Skipping (unparsed): {file.name}")
                 continue
 
             # Resolve show IMDb ID (may prompt user)
-            imdb_id = get_or_prompt_show_imdb_id(show, file.parent.name, show_id_map)
+            imdb_id = get_or_prompt_show_imdb_id(show, folder_name, show_id_map)
 
             # Determine episode IMDb ID (could be embedded in filename or resolved via cache/prompts)
             ep_imdb_id = _get_episode_ids_from_filename(file.stem)

@@ -109,8 +109,15 @@ def extract_movie_info(filename):
     return None, None, None
 
 
-def extract_episode_info(filename):
+def extract_episode_info(filename, folder_name=None):
     fname = filename.lower()
+    fallback_show = ""
+    if folder_name:
+        fallback_show = str(folder_name).strip().replace('.', ' ').replace('_', ' ')
+
+    def _resolve_show(raw_show: str):
+        text = (raw_show or fallback_show).strip().replace('.', ' ').replace('_', ' ')
+        return apply_series_alias(text)
 
     # 0. Multi-episode patterns (e.g. S03E04E05, S03E04-E05)
     multi_patterns = [
@@ -123,7 +130,7 @@ def extract_episode_info(filename):
         if match:
             groups = match.groups()
             raw_show = groups[0].strip().replace('.', ' ').replace('_', ' ')
-            show = apply_series_alias(raw_show)
+            show = _resolve_show(raw_show)
             season = int(groups[1]) if groups[1] and str(groups[1]).isdigit() else 1
             ep1 = int(groups[2]) if groups[2] and str(groups[2]).isdigit() else None
             ep2 = int(groups[3]) if groups[3] and str(groups[3]).isdigit() else None
@@ -177,7 +184,7 @@ def extract_episode_info(filename):
         if match:
             groups = match.groups()
             raw_show = groups[0].strip().replace('.', ' ').replace('_', ' ')
-            show = apply_series_alias(raw_show)
+            show = _resolve_show(raw_show)
             season = int(groups[1]) if len(groups) > 1 and groups[1] and str(groups[1]).isdigit() else 1
             episode_raw = groups[2] if len(groups) > 2 else None
             # Robustly extract the full extras string (preserve all trailing content)
@@ -229,7 +236,7 @@ def extract_episode_info(filename):
             match = re.match(rf"^(.*?)[\s._-]*[\(]?\b{re.escape(keyword)}\b[\)]?[\s._-]*(.*)$", filename, re.I)
             if match:
                 raw_show = match.group(1).strip().replace('.', ' ').replace('_', ' ')
-                show = apply_series_alias(raw_show)
+                show = _resolve_show(raw_show)
                 extras = clean_extras(match.group(2), keep_dots=False)
                 # Always add the keyword to extras if not already present
                 if keyword.strip().title() not in extras:
@@ -238,11 +245,11 @@ def extract_episode_info(filename):
     # 3. Handle special case: just "Season N" or similar
     if "season" in fname:
         raw_show = filename.strip().replace('.', ' ').replace('_', ' ')
-        show = apply_series_alias(raw_show)
+        show = _resolve_show(raw_show)
         return show, 0, None, None
     # 4. Default fallback
     raw_show = filename.strip().replace('.', ' ').replace('_', ' ')
-    show = apply_series_alias(raw_show)
+    show = _resolve_show(raw_show)
     return show, None, None, None
     #     return filename.strip().replace('.', ' ').replace('_', ' '), 0, None, None
 
