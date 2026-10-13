@@ -1,7 +1,6 @@
 # movies_utils.py
 # Utility functions for movies renamer logic
 from pathlib import Path
-import difflib
 
 # def clean_brackets(text: str) -> str:
 #     """Remove surrounding brackets [] or () from a string if present."""
@@ -61,49 +60,33 @@ def get_title_diff(orig_title, meta_title):
     import re
     import unicodedata
 
-    # Normalize whole titles first to ignore punctuation/acronym differences
-    def _normalize_title(title: str) -> str:
-        title = unicodedata.normalize("NFKD", str(title))
-        # map dash variants to ASCII hyphen
-        title = re.sub(r"[‐-‒–—―]", "-", title)
-        title = title.replace("&", "and")
-        # replace dots with spaces for acronyms (E.T. -> E T)
-        title = re.sub(r"\.", " ", title)
-        # remove ! and ?
-        title = title.replace("!", "").replace("?", "")
-        # remove punctuation but keep spaces and hyphens
-        title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE)
-        # replace hyphens with spaces so "Extra-Terrestrial" and "Extra Terrestrial" match
-        title = title.replace("-", " ")
-        # collapse multiple spaces
-        title = re.sub(r"\s+", " ", title).strip().lower()
-        return title
+    def _normalize_word(word: str) -> str:
+        normalized = unicodedata.normalize("NFKD", word)
+        normalized = "".join(
+            char for char in normalized
+            if not unicodedata.combining(char)
+        )
+        normalized = normalized.replace("&", "and")
+        return re.sub(r"[^\w]", "", normalized).lower()
 
-    if _normalize_title(orig_title) == _normalize_title(meta_title):
-        return ""
-
-    # Split into words
-    orig_words = orig_title.split()
-    meta_words = meta_title.split()
-
-    # Normalization helper: remove common punctuation and lowercase for fuzzy matching.
-    # This makes "Charlie's" and "Charlies" compare equal and avoids spurious diffs
-    # caused only by punctuation differences.
-    def _normalize_word(w: str) -> str:
-        # remove punctuation characters (keep alphanumerics and underscore), lower-case
-        return re.sub(r"[^\w]", "", w).lower()
-
-    norm_orig = [_normalize_word(w) for w in orig_words]
-    norm_meta = [_normalize_word(w) for w in meta_words]
-
-    # Use SequenceMatcher on normalized words to find differing blocks
-    sm = difflib.SequenceMatcher(None, norm_orig, norm_meta)
+    orig_words = re.findall(r"[\w]+", str(orig_title), flags=re.UNICODE)
+    meta_words = re.findall(r"[\w]+", str(meta_title), flags=re.UNICODE)
+    remaining_meta = [_normalize_word(word) for word in meta_words]
     diff_words = []
-    opcodes = sm.get_opcodes()
-    for tag, i1, i2, j1, j2 in opcodes:
-        if tag == 'delete' or tag == 'replace':
-            # return the original (un-normalized) words from orig_title to preserve formatting
-            diff_words.extend(orig_words[i1:i2])
+
+    # Match title words regardless of order, but keep numeric tokens exact. A
+    # source number such as 003 must remain distinct from a title number 3.
+    for word in orig_words:
+        normalized = _normalize_word(word)
+        try:
+            match_index = remaining_meta.index(normalized)
+        except ValueError:
+            match_index = -1
+        if match_index >= 0:
+            remaining_meta.pop(match_index)
+        else:
+            diff_words.append(word)
+
     return ' '.join(diff_words)
 
 

@@ -208,6 +208,34 @@ def get_series_folder_name(path_or_name):
     return name.replace('\u2013', '-').replace('\u2014', '-').strip()
 
 
+def _hydrate_series_metadata(imdb_id):
+    """Fetch complete series metadata for an ID selected during this run."""
+    if not imdb_id:
+        return None
+
+    meta = get_entry(imdb_id)
+    # Episode gaps are handled by the existing fetch_episode_ids_omdb call
+    # below, so do not repeat the show-level OMDb request for those entries.
+    if meta and meta.get('type') == 'series' and meta.get('title') and meta.get('year'):
+        return meta
+
+    try:
+        from actions.omdb_gui_scraper import safe_request
+        safe_request(
+            fetch_title_and_year_from_imdb_id,
+            imdb_id,
+            True,
+            False,
+            message=f"Fetching metadata and episodes for {imdb_id}...",
+        )
+    except Exception:
+        try:
+            fetch_title_and_year_from_imdb_id(imdb_id, populate_episodes=True, fetch_poster=False)
+        except Exception:
+            pass
+    return get_entry(imdb_id)
+
+
 def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
     # Prompt handled by GUI module (imported above). The prompt function
     # signature matches the previous nested implementation and returns
@@ -271,7 +299,9 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             f"Cached IMDb ID {cached_imdb_id} is type={cached_meta.get('type')}, not series. "
             f"Pick the correct series IMDb ID for this folder or skip."
         )
-        manual_id = prompt_for_imdb_id_conflict(folder_name, cached_imdb_id, reason)
+        manual_id = prompt_for_imdb_id_conflict(
+            folder_name, cached_imdb_id, reason, expected_type='series'
+        )
         ui_debug_print(f"[DBG] type conflict prompt returned: {manual_id} for {cache_key}")
         if manual_id is None:
             debug_print(f"⏭️ Skipped by user: {cache_key}")
@@ -281,8 +311,8 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
         else:
             cached_imdb_id = manual_id
             force_override = False
-        cached_meta = get_entry(cached_imdb_id) if cached_imdb_id else None
-        if not cached_meta:
+        cached_meta = _hydrate_series_metadata(cached_imdb_id)
+        if not cached_meta or cached_meta.get('type') != 'series':
             return None
 
     # If this turned out to be a series, try to populate episode map too.
@@ -410,7 +440,9 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
                 f"Folder IMDb ID {folder_imdb_id} is type={meta.get('type')}, not series. "
                 f"Pick the correct series IMDb ID for this folder or skip."
             )
-            manual_id = prompt_for_imdb_id_conflict(folder_name, folder_imdb_id, reason)
+            manual_id = prompt_for_imdb_id_conflict(
+                folder_name, folder_imdb_id, reason, expected_type='series'
+            )
             ui_debug_print(f"[DBG] folder type conflict prompt returned: {manual_id} for {cache_key}")
             if manual_id is None:
                 debug_print(f"⏭️ Skipped by user: {cache_key}")
@@ -419,8 +451,8 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
                 folder_imdb_id, _force_override = manual_id
             else:
                 folder_imdb_id = manual_id
-            meta = get_entry(folder_imdb_id) if folder_imdb_id else None
-            if not meta:
+            meta = _hydrate_series_metadata(folder_imdb_id)
+            if not meta or meta.get('type') != 'series':
                 return None
         elif title_val and title_val.strip().lower() == str(show).strip().lower():
             debug_print(f"[IMDB] Using IMDb ID from folder name: {folder_imdb_id} (title matches '{show}')")
@@ -450,7 +482,9 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
                 f"Selected IMDb ID {imdb_id} is type={meta.get('type')}, not series. "
                 f"Pick the correct series IMDb ID for this folder or skip."
             )
-            manual_id = prompt_for_imdb_id_conflict(folder_name, imdb_id, reason)
+            manual_id = prompt_for_imdb_id_conflict(
+                folder_name, imdb_id, reason, expected_type='series'
+            )
             ui_debug_print(f"[DBG] selected type conflict prompt returned: {manual_id} for {cache_key}")
             if manual_id is None:
                 debug_print(f"⏭️ Skipped by user: {cache_key}")
@@ -460,8 +494,8 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
             else:
                 imdb_id = manual_id
                 force_override = False
-            meta = get_entry(imdb_id) if imdb_id else None
-            if not meta:
+            meta = _hydrate_series_metadata(imdb_id)
+            if not meta or meta.get('type') != 'series':
                 continue
         # If this is a newly-picked series (no metadata or no episodes), try to populate metadata and episodes now.
         if not meta or not meta.get('episodes'):

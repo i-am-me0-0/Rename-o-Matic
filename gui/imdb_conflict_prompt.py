@@ -6,7 +6,7 @@ from PIL import Image, ImageTk
 from config import debug_print, ui_debug_print
 
 
-def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None):
+def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None, expected_type=None):
         """Show a small dialog asking the user to resolve an IMDb ID conflict.
 
         Returns:
@@ -106,7 +106,13 @@ def prompt_for_imdb_id_conflict(folder_name, conflicting_id, reason, master=None
                 top_cache = tk.Toplevel(root)
                 top_cache.title("Pick Existing Cache Entry")
                 top_cache.geometry("832x530+200+200")
-                frame = ExistingCachePickerFrame(top_cache, folder_name, conflicting_id or '', picker_callback)
+                frame = ExistingCachePickerFrame(
+                    top_cache,
+                    folder_name,
+                    conflicting_id or '',
+                    picker_callback,
+                    filter_type=expected_type,
+                )
                 frame.pack(fill='both', expand=True)
                 top_cache.transient(root)
                 top_cache.grab_set()

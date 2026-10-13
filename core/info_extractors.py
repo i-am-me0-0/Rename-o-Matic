@@ -77,8 +77,17 @@ def extract_movie_info(filename):
             
             if not is_resolution and title:
                 return title, year, extras
+
+    resolution_match = re.search(
+        r"(?<!\w)(?:480|720|1080|2160)p(?!\w)", filename, re.IGNORECASE
+    )
+    if resolution_match:
+        title = filename[:resolution_match.start()].strip().replace('.', ' ').replace('_', ' ')
+        extras = clean_extras(filename[resolution_match.start():], keep_dots=False)
+        if title:
+            return title, None, extras
     
-    # 4. Fallback: keep suspicious long numeric tokens (e.g. 20000) as extras
+    # 5. Fallback: keep suspicious long numeric tokens (e.g. 20000) as extras
     # when no valid movie year could be parsed.
     normalized = filename.replace('.', ' ').replace('_', ' ').strip()
     tokens = [t for t in normalized.split() if t]
