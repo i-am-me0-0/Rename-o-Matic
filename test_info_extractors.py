@@ -41,6 +41,16 @@ class ExtractEpisodeInfoFallbackTests(unittest.TestCase):
         self.assertEqual(episode, 2)
         self.assertEqual(extras, "720p")
 
+    def test_uses_folder_name_for_filename_starting_with_season_episode(self):
+        show, season, episode, extras = extract_episode_info(
+            "s01e01_Welcome.to.LazyTown 720p x265",
+            folder_name="LazyTown.2004-2014.web",
+        )
+
+        self.assertEqual(show, "LazyTown 2004-2014 web")
+        self.assertEqual(season, 1)
+        self.assertEqual(episode, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

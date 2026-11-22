@@ -20,6 +20,7 @@ import tkinter as tk
 from core.manual_episode_cache import load_manual_episode_cache, save_manual_episode_cache
 from core.manual_episode_title_cache import load_manual_episode_title_cache, save_manual_episode_title_cache
 from gui.episode_id_prompt import prompt_for_episode_id, EpisodeIDPrompt, EpisodeIDPromptFrame
+from gui.episode_offset_prompt import prompt_for_episode_offset
 from config import SKIP_IMDB_IDS
 from core.series_utils import is_imdb_id_skipped
 from actions.omdb_gui_scraper import fetch_title_and_year_from_imdb_id, fetch_episode_ids_omdb
@@ -119,6 +120,138 @@ def _has_skipped_episode_id(ep_id, name):
         if is_imdb_id_skipped(eid, name):
             return True
     return False
+
+
+def _episode_title_for_id(episode_id):
+    if not episode_id:
+        return ""
+    metadata = load_metadata()
+    entry = metadata.get(str(episode_id), {})
+    return str(entry.get("title") or "") if isinstance(entry, dict) else ""
+
+
+def _looks_like_special_title(title):
+    lowered = str(title or "").lower()
+    return any(
+        keyword in lowered
+        for keyword in (
+            "special",
+            "bonus",
+            "behind the scenes",
+            "webisode",
+            "preview",
+            "recap",
+        )
+    )
+
+
+def _title_tokens(title):
+    cleaned = re.sub(r"[^a-z0-9]+", " ", str(title or "").lower())
+    return {
+        token
+        for token in cleaned.split()
+        if len(token) > 2 and token not in {"the", "and", "for"}
+    }
+
+
+def _titles_match(left, right):
+    left_tokens = _title_tokens(left)
+    right_tokens = _title_tokens(right)
+    if not left_tokens or not right_tokens:
+        return False
+    overlap = len(left_tokens & right_tokens)
+    return overlap >= 2 or overlap == min(len(left_tokens), len(right_tokens))
+
+
+def _local_episode_title(file):
+    numbers = _episode_numbers(extract_episode_info(file.stem)[2])
+    if not numbers:
+        return ""
+    _show, _season, _episode, extras = extract_episode_info(file.stem)
+    return extras
+
+
+def _episode_offset_rows(files, source_map, offset):
+    numbered = []
+    for file, _season, episode, _extras in files:
+        numbers = _episode_numbers(episode)
+        if len(numbers) == 1:
+            numbered.append((numbers[0], file.name))
+    if not numbered:
+        return []
+
+    rows = []
+    for local_ep, file_name in sorted(numbered):
+        source_ep = local_ep + offset
+        source_id = source_map.get(source_ep)
+        rows.append((local_ep, source_ep, _episode_title_for_id(source_id), file_name))
+    return rows
+
+
+def _find_episode_offset_candidate(files, episode_cache, imdb_id):
+    by_season = {}
+    for file, season, episode, extras in files:
+        numbers = _episode_numbers(episode)
+        if season is None or len(numbers) != 1:
+            continue
+        by_season.setdefault(int(season), []).append((file, season, episode, extras))
+
+    for season, season_files in sorted(by_season.items()):
+        local_numbers = sorted({_episode_numbers(item[2])[0] for item in season_files})
+        if not local_numbers:
+            continue
+        source_map = episode_cache.get(imdb_id, {}).get(season, {})
+        if not source_map:
+            continue
+
+        first_source_id = source_map.get(local_numbers[0])
+        first_title = _episode_title_for_id(first_source_id)
+        has_gap = any(ep not in source_map for ep in local_numbers)
+        suspicious_first = (
+            local_numbers[0] == 1
+            and len(local_numbers) > 1
+            and _looks_like_special_title(first_title)
+        )
+        adjacent_title_shift = False
+        if local_numbers[0] == 1 and len(local_numbers) > 1:
+            first_file = next(
+                item[0] for item in season_files
+                if _episode_numbers(item[2]) == [1]
+            )
+            second_file = next(
+                item[0] for item in season_files
+                if _episode_numbers(item[2]) == [2]
+            )
+            adjacent_title_shift = (
+                _titles_match(
+                    _local_episode_title(first_file),
+                    _episode_title_for_id(source_map.get(2)),
+                )
+                and _titles_match(
+                    _local_episode_title(second_file),
+                    _episode_title_for_id(source_map.get(3)),
+                )
+            )
+        if has_gap or suspicious_first or adjacent_title_shift:
+            return season, season_files, source_map
+    return None
+
+
+def _apply_episode_offset(imdb_id, season_files, source_map, offset):
+    manual_cache = load_manual_episode_cache()
+    season_cache = manual_cache.setdefault(str(imdb_id), {}).setdefault(str(season_files[0][1]), {})
+    changed = False
+    for _file, _season, episode, _extras in season_files:
+        numbers = _episode_numbers(episode)
+        if len(numbers) != 1:
+            continue
+        local_ep = numbers[0]
+        source_id = source_map.get(local_ep + offset)
+        if source_id:
+            season_cache[str(local_ep)] = str(source_id)
+            changed = True
+    if changed:
+        save_manual_episode_cache(manual_cache)
 
 
 def _get_episode_ids_from_filename(file_stem):
@@ -1432,10 +1565,13 @@ def plan_series_renames_with_gui_prompts(root=None):
     for file in SERIES_DIR.rglob("*"):
         if not (file.is_file() and is_video_file(file)):
             continue
-        show, season, episode, extras = extract_episode_info(file.stem)
+        folder_name = get_series_folder_name(file)
+        show, season, episode, extras = extract_episode_info(
+            file.stem,
+            folder_name=folder_name,
+        )
         if not show:
             continue
-        folder_name = get_series_folder_name(file)
         show_files.setdefault((show, folder_name), []).append((file, season, episode, extras))
 
     # For each show, resolve a validated IMDb ID (this will consult imdb_cache but
@@ -1504,6 +1640,23 @@ def plan_series_renames_with_gui_prompts(root=None):
                 missing_episodes.append((file, season, episode, extras))
             else:
                 episode_map[(season, episode)] = ep_id
+
+        offset_candidate = _find_episode_offset_candidate(files, episode_cache, imdb_id)
+        if offset_candidate:
+            candidate_season, candidate_files, candidate_source_map = offset_candidate
+            proposed_rows = _episode_offset_rows(candidate_files, candidate_source_map, 1)
+            offset = prompt_for_episode_offset(
+                root,
+                f"{show} | Season {candidate_season:02}",
+                proposed_rows,
+            )
+            if offset is not None and offset != 0:
+                _apply_episode_offset(
+                    imdb_id,
+                    candidate_files,
+                    candidate_source_map,
+                    offset,
+                )
 
         # Batch prompt for missing episode IDs using the GUI prompt component
         if missing_episodes:
