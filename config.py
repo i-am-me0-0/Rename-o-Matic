@@ -129,7 +129,7 @@ def init_config():
         for section, opts in DEFAULTS.items():
             config[section] = opts
         with open(CONFIG_FILE, "w", encoding="utf-8") as cfg:
-            cfg.write("# Media Renamer Configuration\n")
+            cfg.write("# Rename-o-Matic Configuration\n")
             cfg.write("# Essential settings at top, advanced settings at bottom\n\n")
             config.write(cfg)
         print(f"[config] Created default configuration at {CONFIG_FILE}")

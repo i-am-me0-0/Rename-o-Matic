@@ -4,7 +4,7 @@ import tkinter as tk
 class MainMenu(tk.Frame):
     def __init__(self, master, show_preview, show_execute, show_undo, show_scrape, show_config, quit_app, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
-        label = tk.Label(self, text="Welcome to the Media Renamer Tool!", font=("Arial", 16))
+        label = tk.Label(self, text="Welcome to Rename-o-Matic!", font=("Arial", 16))
         label.pack(pady=20)
 
         btn_preview = tk.Button(self, text="Generate Preview", command=show_preview)

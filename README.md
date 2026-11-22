@@ -1,208 +1,198 @@
-# Media Renamer (Actuall App)
+# Rename-o-Matic
 
-## Short summary
-Media Renamer is a lightweight Python + Tkinter app that scans a movie/series library, fetches metadata (OMDb + IMDb HTML scraping), cleans and standardizes titles, builds consistent filenames, and lets you preview and apply renames with manual confirmation when needed.
+**A Python/Tkinter app for organizing and renaming movie and TV libraries.**
 
-## Quick start
-Requires Python 3.13+ in a virtual environment for consistency.
+Rename-o-Matic scans your media folders, resolves movie and episode metadata, creates consistent names, and gives you a preview before anything is moved or renamed. It uses a Tkinter interface and JSON caches so decisions can be reviewed and reused.
 
-**Create the virtual environment:**
+## What it does
+
+- Parses movie and series filenames, including years, IMDb IDs, seasons, episodes, resolutions, audio tags, and subtitles.
+- Uses OMDb metadata and IMDb HTML scraping as metadata sources.
+- Detects ambiguous matches and asks for confirmation through interactive dialogs.
+- Builds clean, predictable movie files/folders and episode filenames.
+- Supports season/episode remapping, manual series mode, and batch editing.
+- Writes rename plans for review before execution.
+- Records applied operations in `rename_log.txt`; undo reverses every entry the log can currently reverse.
+- Keeps metadata, episode, poster, and OMDb usage caches in `cache/`.
+
+## Requirements
+
+- Python 3.13
+- An OMDb API key
+- Tkinter support from your Python installation
+
+## Install
+
+Create a local virtual environment from the repository root. The `.venv` directory is not included in the repository.
+
+**Windows**
+
 ```powershell
-py -m venv .venv
+py -3.13 -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-**Activate the virtual environment:**
-```powershell
-.venv\Scripts\Activate.ps1
+**macOS or Linux**
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-**Install dependencies:**
+Tkinter must be available in your Python installation. It is included with most standard Python distributions, while some Linux distributions require a package such as `python3-tk`.
+
+## Run
+
+**Windows**
+
 ```powershell
-pip install -r requirements.txt
+.venv\Scripts\python.exe .\main.py
 ```
 
-**Normal launch:**
-```powershell
-py .\main.py
+**macOS or Linux**
+
+```sh
+.venv/bin/python ./main.py
 ```
 
-**Test mode:**
+
+## Test mode
+
+**Windows**
+
 ```powershell
-py .\main.py test
+.venv\Scripts\python.exe .\main.py test
 ```
 
-Test mode uses a different config file (`testconfig.ini`) and the test library. It also runs `test_planned_renames.py` to verify renames comply with expectations.
+**macOS or Linux**
+
+```sh
+.venv/bin/python ./main.py test
+```
+
+Test mode uses `testconfig.ini` and `testLibrary/` instead of the normal configuration and media paths. The preview flow can also run `test_planned_renames.py` for test-mode validation.
+
+## First launch
+
+![API key prompt](images/api-key-prompt.png)
+
+On first launch, Rename-o-Matic opens an API-key prompt if `OMDb > omdb_api_key` is empty or still set to `key`. Request a key from [OMDb](https://www.omdbapi.com/apikey.aspx), enter it in the prompt, and restart the app.
+
+**Do not share the API key.**
 
 
-## First Launch
-On first launch, you'll be prompted to enter an OMDb API key. The app requires this to fetch movie and series metadata.
+After configuration, the main menu provides preview generation, execution, undo, image scraping, and configuration editing.
 
-**To get a free API key:**
-1. Visit [http://www.omdbapi.com/apikey.aspx](http://www.omdbapi.com/apikey.aspx)
-2. Sign up for a free API key (1,000 requests/day limit)
-3. Enter the key in the prompt when launching the app
-
-The API key will be saved to your config file and you won't need to enter it again.
-
-![API Key Prompt](images/api-key-prompt.png)
-
-## The Main Menu
-![Main Menu](images/main-menu.png)
+![Main menu](images/main-menu.png)
 
 ## Configuration
-The app provides a user-friendly configuration editor accessible from the main menu. Instead of manually editing `config.ini`, you can use the GUI to adjust settings.
 
-**Features:**
-- Form-based interface with toggles, dropdowns, and path browsers
-- Organized into Essential Settings and General Settings
-- Shows before/after confirmation dialog when saving changes
-- Preserves comments and formatting in the config file
+Open **Edit Configuration** in the app to change settings through the GUI. Saving shows a before/after confirmation and preserves the config file.
 
-**What you can configure:**
-- **Media library paths** — movies and series directories
-- **OMDb API key** — your API key for metadata fetching
-- **Series aliases** — map non-standard folder names to canonical series names
-- **Language codes** — subtitle language tags (leading comma = files without language tag)
-- **Movie folder location** — create in root or keep in source subfolder
-- **Movie subfolders** — whether to create individual folders per movie
-- **Default include** — whether new preview entries are checked by default
-- **Episode title in extras** — include episode names in extra file tags
-- **Debug modes** — console and UI debug output toggles
-- **File extensions** — recognized video and subtitle formats
-- **Edge keywords** — special episode detection keywords
+The main settings are in `config.ini`:
 
-![Config Editor - Top](images/config-editor-1.png)
+- `Paths`: movie and series library directories
+- `OMDb`: API key and endpoint settings
+- `SeriesAliases`: maps folder names to canonical series names
+- `General`: subtitle language tags, movie folder layout, preview defaults, debug flags, and skipped IMDb IDs
+- `Extensions`: recognized video and subtitle extensions
+- `Series`: edge-case keywords
+- `OMDbAdvanced`: request delay, search limit, and HTTP user agents
+- `InternalPaths`: cache and rename-log filenames
 
-![Config Editor - Scrolled](images/config-editor-2.png)
+![Config editor](images/config-editor-1.png)
 
-## What the app does
-- Scans movie files and series folders, parsing titles, years, IMDb IDs, and extras.
-- Fetches missing metadata and posters using OMDb first, then IMDb HTML scraping if needed.
-- Builds consistent destination filenames and folder paths.
-- Cleans extras for both movies and series (resolution, audio, tags) and sanitizes paths to avoid path issues.
-- Provides an interactive picker for ambiguous matches.
-- Writes a preview plan and lets you apply or undo renames.
+![Config editor, scrolled](images/config-editor-2.png)
 
-## Main components (where things live)
-- **main.py** — app entry point and test harness.
-- **gui/** — Tkinter screens (picker, preview, prompts).
-- **actions/** — high-level behaviors (movies, series, preview, OMDb/IMDb scraping).
-- **core/** — file parsing, metadata helpers, filename building, cache tools.
-- **cache/** — JSON caches (metadata, posters, etc.).
-<!-- - **run-tests.py** — deterministic tests using a local OMDb stub. -->
+## Rename workflow
 
-## Key files
-- **planned_renames.json** — preview output of source → destination changes.
-- **rename_log.txt** — history of applied renames (used for undo).
-- **config.ini / config.py** — runtime settings (paths, OMDb host, naming rules).
-- **cache/media_metadata.json** — central metadata cache (title/year/imdb/episodes/poster). This is the source of truth.
-- **cache/imdb_cache.json** — filename to matched IMDb ID cache. If encountering issues, clear problem entries here.
-- **cache/omdb_request_tracking.json** — tracks OMDb API usage per day (rolling 2-day window). Contains user-editable fields: `key_label` (display name), `user_note` (reminder of API limits), and `daily_limit` (requests per day).
+### 1. Scan
 
-## How it works (end-to-end flow)
-### 1) Scan
-The app walks your folders, identifies movie files and series folders, and parses filenames to extract:
-- title
-- year
-- extras (resolution/audio/tags)
-- IMDb ID (if present)
+Rename-o-Matic walks the configured movie and series directories and extracts available metadata. It identifies:
 
-If an IMDb ID is present but missing from the cache, the app fetches metadata automatically:
-1) OMDb API
-2) IMDb HTML scraping fallback
+- Titles and years
+- IMDb IDs
+- Season and episode numbers
+- Resolution, audio, subtitle, and other extra tags
 
-All network calls run in background threads and show a short wait overlay in the UI.
+When metadata is missing or ambiguous, the app uses the OMDb and IMDb tools and may show a picker or mismatch prompt.
 
-**Note:** The app treats `cache/media_metadata.json` as the source of truth for all metadata. 
+Network requests run in background threads so the Tkinter interface stays responsive.
 
-If you encounter incorrect metadata:
-1. Check the IMDb ID entry in `cache/media_metadata.json`
-2. Open the **Preview Metadata Cache** from the preview window
-3. Select the problematic entry
-4. Click **Refresh from OMDb** to fetch fresh data
+### 2. Resolve metadata
 
-### 2) Match metadata (picker)
-If multiple matches are possible, a picker dialog appears. You can confirm, skip, or cancel. The picker distinguishes between movie and series matches so you can make an informed choice.
+Interactive dialogs handle uncertain title matches, IMDb ID conflicts, years, cache entries, episodes, and season numbering.
 
-![OMDb Search Picker](images/OMDB-search.png)
+![OMDb search picker](images/OMDB-search.png)
 
-If a cached entry is found but the year doesn't match, a year mismatch prompt appears:
+![Year mismatch prompt](images/year-mismatch.png)
 
-![Year Mismatch Prompt](images/year-mismatch.png)
+![Existing cache picker](images/Cache-Picker.png)
 
-You can also pick from existing cached entries:
+### 3. Review
 
-![Cache Picker](images/Cache-Picker.png)
+The preview stores proposed source/destination pairs in `planned_renames.json`. Only real changes are shown; files that already match the generated name are filtered out.
 
-### 3) Build destination names
-The app builds a new filename using the cleaned title + year and a normalized extras list. It also sanitizes paths to prevent accidental subfolders.
+From the preview, you can generate a plan, start with a blank plan, edit planned names, batch-edit entries, inspect or refresh metadata, open the OMDb scraper, or remap seasons and episodes.
 
-Anything not in the new filename (but deemed important) is added to extras as a safeguard.
+![Preview menu](images/preview-menu-options.png)
 
-### 4) Preview
-The app writes `planned_renames.json` and shows a preview window with all proposed changes. You can edit, enable/disable individual entries, or proceed to execution.
+![Batch editing](images/batch-edit.png)
 
-The preview count reflects only actual changes (files already correctly named are filtered out).
+![Collapsed folders](images/folders-can-be-colapsed.png)
 
-The preview window is organized into two columns:
-- **Left:** Generate Preview, Create Blank Slate, View/Edit Planned Renames, Batch Edit
-- **Right:** Preview Metadata Cache, OMDB Scraper (with usage stats shown at the bottom)
+### 4. Apply
 
-After generating a preview, the console displays:
-- Session OMDb request count
-- Today's usage: `{key_label}: {today}/{limit} requests (Yesterday: {yesterday})`
+Execution moves or renames selected entries and moves matching subtitles with their video files where possible. Each operation is recorded in `rename_log.txt`.
 
-![Preview Menu Options](images/preview-menu-options.png)
+![Execution screen](images/execution-screen.png)
 
+### 5. Undo
 
-Batch edit functionality is available for bulk changes:
+The undo window reads `rename_log.txt` and reverses the operations recorded there.
 
-![Batch Edit](images/batch-edit.png)
+**Warning:** undo is not guaranteed to be limited to the most recent preview. Review the log before undoing changes, especially after several rename sessions.
 
-Folders can be collapsed to reduce clutter while reviewing entries:
+## Cache and state files
 
-![Folders Can Be Collapsed](images/folders-can-be-colapsed.png)
+- `config.ini` - normal runtime configuration
+- `testconfig.ini` - test-mode configuration
+- `planned_renames.json` - current preview plan
+- `rename_log.txt` - rename history used by undo
+- `cache/media_metadata.json` - central movie, series, episode, and poster metadata cache
+- `cache/imdb_cache.json` - filename/series names mapped to IMDb IDs
+- `cache/manual_episode_cache.json` - manually selected episode IMDb IDs
+- `cache/manual_episode_title_cache.json` - manually selected episode titles
+- `cache/omdb_request_tracking.json` - local OMDb usage tracking
+- `cache/poster_url_cache.json` - poster URL cache
 
-### 5) Execute
-When you apply the preview, files are moved/renamed and logged to `rename_log.txt`. Subtitles are moved alongside video files when possible.
+OMDb usage tracking records the current day, the previous day, a display label, an optional note, and a configurable daily request limit. Remove or refresh cache entries when stale or incorrect metadata needs to be replaced.
 
-![Execution Screen](images/execution-screen.png)
+## Local IMDb API tool
 
-### 6) Undo
-The undo feature reads `rename_log.txt` and attempts to reverse operations.
+The `tools/imdb_local_api/` directory contains a FastAPI/uvicorn helper for serving IMDb data from a local dataset. It is optional and not required for the desktop app's normal flow.
 
-⚠️ **IMPORTANT WARNING:** Undo will reverse **EVERY entry** it can find in `rename_log.txt`. It is not limited to the most recent batch. Review the log first if you want selective undo behavior.
+If that tool is used, its required packages are included in `requirements.txt`.
 
-<!-- ## Tests (deterministic)
-Run tests with the local OMDb stub for stable, reproducible results:
+## Project layout
 
-```powershell
-py .\run-tests.py
-``` -->
+- `main.py` - application entry point and test-mode setup
+- `gui/` - Tkinter windows, menus, pickers, preview, configuration, and prompts
+- `actions/` - movie, series, preview, scraping, and remapping operations
+- `core/` - filename parsing, metadata cache, file utilities, and naming helpers
+- `cache/` - generated metadata and request-state JSON files
+- `tools/imdb_local_api/` - optional local FastAPI IMDb service
 
-## OMDb API request tracking
-The app tracks OMDb API usage to help you stay within daily limits (free tier: 1000 requests/day).
+## Known limitations
 
-**Features:**
-- Tracks requests per day with a rolling 2-day window
-- Warns at 90% of daily limit
-- Displays usage stats in the preview window and after generating previews
-
-**User-editable fields** in `cache/omdb_request_tracking.json`:
-- `key_label` — display name for the API key (e.g., "main key", "test key")
-- `user_note` — reminder about your API tier/limits
-- `daily_limit` — requests allowed per day (default: 1000)
-
-These fields are automatically added when missing and are never overwritten by the app.
+Media filenames can contain an almost unlimited combination of release groups, quality tags, codecs, language markers, subtitles, collections, punctuation, and unofficial episode names. Some unusual naming patterns may not be recognized or may require manual correction. If a filename is missed or misinterpreted, use the preview, cache, and manual matching tools before applying changes.
 
 ## Troubleshooting
-- If OMDb or poster scraping hangs, point OMDB_BASE_URL to a local stub or check connectivity.
-- If the picker re-prompts unexpectedly, ensure picker state uses boolean flags (selection/skipped/cancelled) and not bound methods.
-- If approaching OMDb API limits, check `cache/omdb_request_tracking.json` for today's usage. Consider using test mode with a separate API key or local stub.
 
-## Developer notes
-- Network calls must not run on the Tkinter main thread. Use safe_request.
-- Avoid import cycles by using local imports when needed.
-- Keep edits small and run the test harness after changes that touch caches, parsing, or UI threading.
-
-
+- **The app closes before opening:** make sure the `OMDb` key is valid and installed dependencies are in `.venv`.
+- **A metadata request hangs:** check connectivity or temporarily point `omdb_base_url` to a local test service.
+- **The wrong match is selected:** clear or refresh the relevant entry in `cache/media_metadata.json` or `cache/imdb_cache.json`, then regenerate the preview.
+- **OMDb usage is blocked:** inspect `cache/omdb_request_tracking.json` and your OMDb account limits.
+- **A preview behaves unexpectedly in test mode:** verify `testconfig.ini` and the paths under `testLibrary/`.

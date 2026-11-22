@@ -16,7 +16,7 @@ from gui.config_editor import ConfigEditorWindow
 class AppRoot(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("OMDb GUI Scraper")
+        self.title("Rename-o-Matic")
         self.geometry("600x400")
         self.protocol("WM_DELETE_WINDOW", self.quit_app)
 
