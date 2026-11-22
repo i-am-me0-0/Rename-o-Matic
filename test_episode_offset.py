@@ -2,10 +2,90 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from actions.series import _episode_offset_rows, _find_episode_offset_candidate
+from actions.series import (
+    _episode_offset_rows,
+    _find_episode_offset_candidate,
+    is_tvdb_id,
+)
+from actions.manual_series_tvdb_scraper import (
+    extract_tvdb_year_range,
+    format_tvdb_episode_name,
+    get_tvdb_cache_key,
+)
 
 
 class EpisodeOffsetTests(unittest.TestCase):
+    def test_tvdb_series_id_is_recognized(self):
+        self.assertTrue(is_tvdb_id("tvdb12345"))
+        self.assertFalse(is_tvdb_id("tt1234567"))
+
+    def test_tvdb_episode_name_uses_existing_bracket_pattern(self):
+        name = format_tvdb_episode_name(
+            "Johnny Test",
+            1,
+            1,
+            ep_title="Johnny to the Center of the Earth",
+            extras="720p x264",
+            ep_id="tvdb4596954",
+        )
+        self.assertEqual(
+            name,
+            "Johnny Test - S01E01 [Johnny to the Center of the Earth - 720p x264] [tvdb4596954]",
+        )
+
+    def test_tvdb_episode_name_collapses_duplicate_hyphens(self):
+        name = format_tvdb_episode_name(
+            "Johnny Test",
+            4,
+            28,
+            ep_title="Who's Johnny",
+            extras="- 720p x264",
+            ep_id="tvdb5197789",
+        )
+        self.assertEqual(
+            name,
+            "Johnny Test - S04E28 [Who's Johnny - 720p x264] [tvdb5197789]",
+        )
+
+    def test_tvdb_year_range_uses_first_and_recent_dates(self):
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(
+            """
+            <li class="list-group-item">
+              <strong>First Aired</strong><span>September 17, 2005</span>
+              <strong>Recent</strong><span>June 18, 2014</span>
+            </li>
+            """,
+            "html.parser",
+        )
+        self.assertEqual(extract_tvdb_year_range(soup), ("2005", "2014"))
+
+    def test_tvdb_single_year_is_not_repeated(self):
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(
+            """
+            <li class="list-group-item">
+              <strong>First Aired</strong><span>January 1, 2020</span>
+              <strong>Recent</strong><span>December 31, 2020</span>
+            </li>
+            """,
+            "html.parser",
+        )
+        self.assertEqual(extract_tvdb_year_range(soup), ("2020", None))
+
+    def test_tvdb_cache_key_excludes_series_root(self):
+        with patch(
+            "actions.manual_series_tvdb_scraper.SERIES_DIR",
+            Path(r"D:\Bigger Downloads\.series\done just names"),
+        ):
+            direct_file = Path(r"D:\Johnny Test S01E01.mkv")
+            season_file = Path(r"D:\Johnny Test\Season 01\Johnny Test S01E01.mkv")
+
+            self.assertEqual(get_tvdb_cache_key(direct_file, "Johnny Test"), "Johnny Test")
+            self.assertEqual(get_tvdb_cache_key(season_file, "Johnny Test"), "Johnny Test")
+
     def setUp(self):
         self.files = [
             (Path("Show S04E01.mkv"), 4, 1, ""),

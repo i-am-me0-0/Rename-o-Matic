@@ -2,7 +2,6 @@ import json
 import threading
 import queue
 import os
-from pathlib import Path
 from typing import Optional, Dict, Any, cast
 from config import MEDIA_METADATA_FILE  
 
@@ -66,12 +65,40 @@ def save_metadata(data: Dict[str, Any]):
             tmp_path = MEDIA_METADATA_FILE.with_suffix('.tmp')
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
             try:
                 os.replace(tmp_path, MEDIA_METADATA_FILE)
             except Exception:
                 tmp_path.rename(MEDIA_METADATA_FILE)
         except Exception:
             pass
+
+
+def flush_metadata(data: Optional[Dict[str, Any]] = None) -> bool:
+    """Synchronously flush metadata and close the temporary file before returning."""
+    global _metadata_cache
+    snapshot = data if isinstance(data, dict) else load_metadata()
+    _metadata_cache = snapshot
+
+    if not MEDIA_METADATA_FILE.parent.exists():
+        MEDIA_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = MEDIA_METADATA_FILE.with_suffix(".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, MEDIA_METADATA_FILE)
+        return True
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        return False
 
 def _background_writer():
     """Background thread that writes the most recent metadata snapshot to disk.

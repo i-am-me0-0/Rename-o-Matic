@@ -53,6 +53,10 @@ def save_imdb_cache(cache):
         pass
 
 
+def is_tvdb_id(value):
+    return isinstance(value, str) and re.fullmatch(r"tvdb\d+", value, re.I) is not None
+
+
 # --- Utility: Get all metadata entries (imdb_id, entry) ---
 def get_all_metadata_entries():
     """Yield (imdb_id, metadata_entry) for every entry in the media metadata cache.
@@ -408,9 +412,23 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
     cached_imdb_id = imdb_cache.get(cache_key) or imdb_cache.get(folder_norm) or imdb_cache.get(show)
     cached_meta = get_entry(cached_imdb_id) if cached_imdb_id else None
 
+    # TVDB mappings are already a complete series/episode cache. They do not
+    # participate in IMDb population or IMDb year/type validation.
+    if cached_imdb_id and is_tvdb_id(cached_imdb_id):
+        if cached_meta and cached_meta.get("type") == "series":
+            debug_print(f"[TVDB] Using cached TVDB series ID {cached_imdb_id} for {cache_key}")
+            show_id_map[(show, cache_key)] = cached_imdb_id
+            return cached_imdb_id
+        debug_print(
+            f"[TVDB] Cached TVDB ID {cached_imdb_id} has no usable series metadata; "
+            "it will be ignored"
+        )
+        cached_imdb_id = None
+        cached_meta = None
+
     # If we have a cached imdb id but no metadata yet, fetch title/year now to populate media cache
     # This ensures fields like 'type' and 'totalSeasons' are present and avoids mis-classifying series
-    if cached_imdb_id and (not cached_meta or not cached_meta.get('year')):
+    if cached_imdb_id and not is_tvdb_id(cached_imdb_id) and (not cached_meta or not cached_meta.get('year')):
         try:
             debug_print(f"[DEBUG] Populating missing media metadata for cached IMDb ID {cached_imdb_id}...")
             # Populate metadata and episodes in one call where possible; avoid extra poster scraping here
@@ -451,7 +469,7 @@ def get_or_prompt_show_imdb_id(show, folder_name, show_id_map):
     # If this turned out to be a series, try to populate episode map too.
     # Keep a generous safety cap to avoid hammering OMDb for extremely large series.
     try:
-        if cached_meta and cached_meta.get('type') == 'series' and not cached_meta.get('episodes'):
+        if cached_meta and cached_meta.get('type') == 'series' and not cached_meta.get('episodes') and not is_tvdb_id(cached_imdb_id):
             ts = cached_meta.get('totalSeasons')
             try:
                 tsn = int(ts) if ts is not None else None
@@ -757,6 +775,8 @@ def get_episode_imdb_id(show, imdb_id, season, episode, file_stem=None):
         ep_ids = lookup_episode_id(imdb_id, season, episode, file_stem=None)
         if ep_ids:
             return ep_ids
+        if is_tvdb_id(imdb_id):
+            return None
         if imdb_id:
             fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
         ep_ids = lookup_episode_id(imdb_id, season, episode, file_stem=None)
@@ -784,6 +804,8 @@ def get_episode_imdb_id(show, imdb_id, season, episode, file_stem=None):
     ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file_stem)
     if ep_id:
         return ep_id
+    if is_tvdb_id(imdb_id):
+        return None
     if imdb_id:
         fetch_episode_ids_omdb(imdb_id, {}, lambda: None)
     ep_id = lookup_episode_id(imdb_id, season, episode, file_stem=file_stem)
@@ -1659,7 +1681,7 @@ def plan_series_renames_with_gui_prompts(root=None):
                 )
 
         # Batch prompt for missing episode IDs using the GUI prompt component
-        if missing_episodes:
+        if missing_episodes and not is_tvdb_id(imdb_id):
             def on_submit(epid_map):
                 manual_episode_cache = load_manual_episode_cache()
                 for idx, (file, season, episode, extras) in enumerate(missing_episodes):
