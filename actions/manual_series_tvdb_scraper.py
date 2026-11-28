@@ -26,6 +26,7 @@ import json
 import re
 import tkinter as tk
 import os
+import unicodedata
 from pathlib import Path
 from typing import Optional, Dict, Any
 from urllib.parse import urlsplit, urlunsplit
@@ -640,6 +641,68 @@ def build_episode_suffix(episode):
     return "E00"
 
 
+def _remove_episode_title_from_extras(ep_title: str, extras: Any) -> Any:
+    if not ep_title or not extras:
+        return extras
+
+    def normalize_title(title: str) -> str:
+        title = unicodedata.normalize("NFKD", str(title))
+        title = re.sub(r"[‐-‒–—―]", "-", title)
+        title = title.replace("&", "and")
+        title = re.sub(r"\.", " ", title)
+        title = title.replace("!", "").replace("?", "")
+        title = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE)
+        title = title.replace("-", " ")
+        return re.sub(r"\s+", " ", title).strip().lower()
+
+    normalized_title = normalize_title(ep_title)
+    if not normalized_title:
+        return extras
+
+    extra_parts = extras if isinstance(extras, (list, tuple, set)) else [extras]
+    cleaned_parts = []
+    for extra in extra_parts:
+        text = str(extra).strip()
+        words = text.split()
+        match = None
+        for start in range(len(words)):
+            for end in range(start + 1, len(words) + 1):
+                candidate = normalize_title(" ".join(words[start:end]))
+                if candidate == normalized_title or candidate.replace(" ", "") == normalized_title.replace(" ", ""):
+                    match = (start, end)
+                    break
+            if match:
+                break
+
+        if match:
+            remainder = " ".join(words[:match[0]] + words[match[1]:]).strip(" \t\r\n-_.")
+            if remainder:
+                cleaned_parts.append(remainder)
+        elif text:
+            cleaned_parts.append(text)
+
+    return cleaned_parts if isinstance(extras, (list, tuple, set)) else (cleaned_parts[0] if cleaned_parts else "")
+
+
+def _remove_episode_id_from_extras(ep_id: str, extras: Any) -> Any:
+    if not ep_id or not extras:
+        return extras
+
+    extra_parts = extras if isinstance(extras, (list, tuple, set)) else [extras]
+    id_pattern = re.compile(rf"(?<![\w]){re.escape(ep_id)}(?![\w])", re.IGNORECASE)
+    cleaned_parts = []
+    for extra in extra_parts:
+        text = str(extra)
+        if id_pattern.search(text):
+            text = id_pattern.sub("", text).strip(" \t\r\n-_.[]")
+        else:
+            text = text.strip()
+        if text:
+            cleaned_parts.append(text)
+
+    return cleaned_parts if isinstance(extras, (list, tuple, set)) else (cleaned_parts[0] if cleaned_parts else "")
+
+
 def format_tvdb_episode_name(
     show: str,
     season: int,
@@ -655,6 +718,8 @@ def format_tvdb_episode_name(
     middle_parts = []
     if ep_title:
         middle_parts.append(str(ep_title).strip())
+        extras = _remove_episode_title_from_extras(ep_title, extras)
+    extras = _remove_episode_id_from_extras(ep_id, extras)
     if extras:
         if isinstance(extras, (list, tuple, set)):
             middle_parts.extend(str(part).strip() for part in extras if str(part).strip())
@@ -762,6 +827,7 @@ def build_to_path(file: Path):
     )
     ep_title = ""
     ep_id = ""
+    output_show = show
 
     # --- TVDB enrichment (optional, per-folder, session-cached) ---
     cache_key = get_tvdb_cache_key(file, show)
@@ -769,6 +835,10 @@ def build_to_path(file: Path):
     if tvdb_url:
         metadata = fetch_tvdb_metadata(tvdb_url, show_title=show)
         if metadata:
+            tvdb_show_title = str(metadata.get("show_title") or "").strip()
+            if tvdb_show_title:
+                output_show, _ = extract_embedded_year(tvdb_show_title)
+                output_show = output_show.strip() or show
             if not embedded_year and metadata.get("year") and metadata["year"] != "YEAR":
                 year_str = metadata["year"]
                 end_year = metadata.get("end_year")
@@ -809,11 +879,14 @@ def build_to_path(file: Path):
                 ep_id = f"tvdb{ep_data['tvdb_id']}"
     # ---------------------------------------------------------------
 
-    show_folder = f"{show} ({year_str}) [{show_id}]"
+    from actions.preview import sanitize_path_component, validate_and_sanitize_path
+
+    output_show = sanitize_path_component(output_show)
+    show_folder = f"{output_show} ({year_str}) [{show_id}]"
     season_folder = f"Season {season:02}"
 
     episode_filename = format_tvdb_episode_name(
-        show,
+        output_show,
         season,
         episode,
         ep_title=ep_title,
@@ -824,11 +897,17 @@ def build_to_path(file: Path):
 
     destination = Path(SERIES_DIR) / show_folder / season_folder / episode_filename
     try:
-        from actions.preview import validate_and_sanitize_path
         destination = Path(validate_and_sanitize_path(str(destination)))
     except Exception as e:
         _tvdb_debug(f"Normal filename sanitizer unavailable, using unsanitized path: {e}")
     return destination
+
+
+def _paths_are_same(src_path: Path, destination: Path) -> bool:
+    try:
+        return src_path.resolve() == destination.resolve()
+    except Exception:
+        return str(src_path) == str(destination)
 
 
 def main():
@@ -837,6 +916,9 @@ def main():
     for file in Path(SERIES_DIR).rglob("*"):
         if file.is_file() and is_video_file(file):
             to_path = build_to_path(file)
+            if _paths_are_same(file, to_path):
+                _tvdb_debug(f"Skipping already correctly named file: {file}")
+                continue
             planned.append({
                 "include": 1,
                 "type": "Series",

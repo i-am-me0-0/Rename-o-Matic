@@ -1,4 +1,6 @@
 import unittest
+import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +14,7 @@ from actions.manual_series_tvdb_scraper import (
     format_tvdb_episode_name,
     get_tvdb_cache_key,
 )
+from core.info_extractors import extract_episode_info
 
 
 class EpisodeOffsetTests(unittest.TestCase):
@@ -46,6 +49,114 @@ class EpisodeOffsetTests(unittest.TestCase):
             name,
             "Johnny Test - S04E28 [Who's Johnny - 720p x264] [tvdb5197789]",
         )
+
+    def test_tvdb_episode_name_removes_title_repeated_in_extras(self):
+        show, season, episode, extras = extract_episode_info(
+            "American Dad! - S01E05 - Roger Codger.720p.DVDRip.x264"
+        )
+        name = format_tvdb_episode_name(
+            show,
+            season,
+            episode,
+            ep_title="Roger Codger",
+            extras=extras,
+        )
+
+        self.assertEqual(
+            name,
+            "American Dad! - S01E05 [Roger Codger - 720p DVDRip x264]",
+        )
+
+    def test_tvdb_episode_name_matches_title_with_punctuation_variations(self):
+        name = format_tvdb_episode_name(
+            "American Dad!",
+            1,
+            4,
+            ep_title="Francine's Flashback",
+            extras="Francines Flashback 720p DVDRip x264",
+        )
+
+        self.assertEqual(
+            name,
+            "American Dad! - S01E04 [Francine's Flashback - 720p DVDRip x264]",
+        )
+
+    def test_tvdb_episode_name_does_not_repeat_existing_episode_id(self):
+        source_name = "American Dad! - S01E01 [Pilot - 720p DVDRip x264] [tvdb108299].mkv"
+        show, season, episode, extras = extract_episode_info(Path(source_name).stem)
+
+        name = format_tvdb_episode_name(
+            show,
+            season,
+            episode,
+            ep_title="Pilot",
+            extras=extras,
+            ep_id="tvdb108299",
+        )
+
+        self.assertEqual(name + ".mkv", source_name)
+
+    def test_tvdb_output_uses_sanitized_tvdb_show_title(self):
+        from actions import manual_series_tvdb_scraper
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            series_dir = Path(temp_dir)
+            source = series_dir / "American Dad S01E01.mkv"
+            source.touch()
+            metadata = {
+                "show_title": "TVDB/Canonical: Show? Title (2005)",
+                "year": "2005",
+                "end_year": "2026",
+                "tvdb_show_id": "73141",
+            }
+
+            with (
+                patch.object(manual_series_tvdb_scraper, "SERIES_DIR", series_dir),
+                patch.object(manual_series_tvdb_scraper, "get_tvdb_cache_key", return_value="American Dad"),
+                patch.object(manual_series_tvdb_scraper, "get_tvdb_url_for_show", return_value="https://tvdb.test/series/73141"),
+                patch.object(manual_series_tvdb_scraper, "fetch_tvdb_metadata", return_value=metadata),
+                patch.object(manual_series_tvdb_scraper, "get_episode_from_cache", return_value={"title": "Pilot", "tvdb_id": "108299"}),
+                patch.object(manual_series_tvdb_scraper, "_load_imdb_cache", return_value={}),
+                patch.object(manual_series_tvdb_scraper, "_save_imdb_cache"),
+            ):
+                destination = manual_series_tvdb_scraper.build_to_path(source)
+
+        expected_show = "TVDB -Canonical - Show - Title"
+        self.assertEqual(
+            destination.parent.parent.name,
+            f"{expected_show} (2005-2026) [tvdb73141]",
+        )
+        self.assertTrue(destination.name.startswith(f"{expected_show} - S01E01"))
+
+    def test_tvdb_scraper_skips_files_already_at_suggested_path(self):
+        from actions import manual_series_tvdb_scraper
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            series_dir = Path(temp_dir)
+            already_named = series_dir / "already-named.mkv"
+            needs_rename = series_dir / "needs-rename.mkv"
+            already_named.touch()
+            needs_rename.touch()
+            planned_file = series_dir / "planned.json"
+            suggested_path = series_dir / "suggested.mkv"
+
+            def suggested_destination(file):
+                return file if file.name == already_named.name else suggested_path
+
+            with (
+                patch.object(manual_series_tvdb_scraper, "SERIES_DIR", series_dir),
+                patch.object(manual_series_tvdb_scraper, "PLANNED_RENAMES_FILE", planned_file),
+                patch.object(manual_series_tvdb_scraper, "is_video_file", return_value=True),
+                patch.object(manual_series_tvdb_scraper, "build_to_path", side_effect=suggested_destination),
+            ):
+                manual_series_tvdb_scraper.main()
+
+            with planned_file.open(encoding="utf-8") as planned_handle:
+                planned = json.load(planned_handle)
+
+        self.assertEqual(len(planned), 1)
+        self.assertEqual(planned[0]["from"], str(needs_rename.resolve()))
+        self.assertEqual(planned[0]["to"], str(suggested_path))
 
     def test_tvdb_year_range_uses_first_and_recent_dates(self):
         from bs4 import BeautifulSoup
